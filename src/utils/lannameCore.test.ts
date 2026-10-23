@@ -88,3 +88,13 @@ test('buildHostsBlock and generateMobileConfigXml produce valid configurations',
   assert.equal(qr.length, 21);
   assert.equal(qr[0].length, 21);
 });
+
+test('multi-domain support generates entries for all domains simultaneously', () => {
+  const multiHosts = buildHostsBlock('192.168.1.24', ['home', 'lab'], ['plex']);
+  assert.ok(multiHosts.includes('192.168.1.24 home plex.home lab plex.lab'));
+
+  const multiXml = generateMobileConfigXml(['home', 'lab'], '192.168.1.24');
+  assert.ok(multiXml.includes('<string>home</string>'));
+  assert.ok(multiXml.includes('<string>lab</string>'));
+  assert.ok(multiXml.includes('<string>local</string>'));
+});

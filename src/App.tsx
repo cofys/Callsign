@@ -10,8 +10,10 @@ import { Friendly502PreviewModal } from './components/Friendly502PreviewModal';
 import { MobileConfigModal } from './components/MobileConfigModal';
 import { ProtocolSimulatorView } from './components/ProtocolSimulatorView';
 import { SourceCodeExplorerView } from './components/SourceCodeExplorerView';
+import { DomainManagerModal } from './components/DomainManagerModal';
+import { SetupWizardView } from './components/SetupWizardView';
 
-type ActiveTab = 'dashboard' | 'simulator' | 'codebase';
+type ActiveTab = 'dashboard' | 'wizard' | 'simulator' | 'codebase';
 
 const INITIAL_SERVICES: ServiceMapping[] = [
   {
@@ -65,6 +67,9 @@ export default function App() {
 
   // iOS MobileConfig Modal state
   const [mobileConfigOpen, setMobileConfigOpen] = useState(false);
+
+  // Custom Domain Manager Modal state
+  const [domainModalOpen, setDomainModalOpen] = useState(false);
 
   const handleAddServiceSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,10 +174,21 @@ export default function App() {
           >
             <button
               type="button"
+              onClick={() => setActiveTab('wizard')}
+              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${
+                activeTab === 'wizard'
+                  ? 'text-sky-400 underline underline-offset-8 font-semibold'
+                  : ''
+              }`}
+            >
+              Setup Wizard (Non-Tech)
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab('dashboard')}
               className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${
                 activeTab === 'dashboard'
-                  ? 'text-sky-400 underline underline-offset-8'
+                  ? 'text-sky-400 underline underline-offset-8 font-semibold'
                   : ''
               }`}
             >
@@ -183,7 +199,7 @@ export default function App() {
               onClick={() => setActiveTab('simulator')}
               className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${
                 activeTab === 'simulator'
-                  ? 'text-sky-400 underline underline-offset-8'
+                  ? 'text-sky-400 underline underline-offset-8 font-semibold'
                   : ''
               }`}
             >
@@ -194,7 +210,7 @@ export default function App() {
               onClick={() => setActiveTab('codebase')}
               className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${
                 activeTab === 'codebase'
-                  ? 'text-sky-400 underline underline-offset-8'
+                  ? 'text-sky-400 underline underline-offset-8 font-semibold'
                   : ''
               }`}
             >
@@ -202,10 +218,10 @@ export default function App() {
             </button>
             <button
               type="button"
-              onClick={() => setMobileConfigOpen(true)}
-              className="hover:text-white transition-colors whitespace-nowrap shrink-0"
+              onClick={() => setDomainModalOpen(true)}
+              className="text-slate-400 hover:text-white transition-colors whitespace-nowrap shrink-0 font-mono text-xs"
             >
-              iOS Split-DNS Profile
+              .{domain} (Edit)
             </button>
           </nav>
 
@@ -291,6 +307,13 @@ export default function App() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setDomainModalOpen(true)}
+                  className="rounded-lg border border-slate-700 bg-[#111827] px-3.5 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
+                >
+                  Customize Domain (.{domain})
+                </button>
                 <button
                   type="button"
                   onClick={() => setMobileConfigOpen(true)}
@@ -470,6 +493,24 @@ export default function App() {
               </div>
             </section>
           </div>
+        )}
+
+        {activeTab === 'wizard' && (
+          <SetupWizardView
+            domain={domain}
+            lanIp={lanIp}
+            services={services}
+            onSetDomain={setDomain}
+            onAddService={(newSvc) => {
+              setServices((prev) => {
+                const filtered = prev.filter((s) => s.name !== newSvc.name);
+                return [...filtered, newSvc].sort((a, b) =>
+                  a.name.localeCompare(b.name)
+                );
+              });
+            }}
+            onOpenMobileConfig={() => setMobileConfigOpen(true)}
+          />
         )}
 
         {activeTab === 'simulator' && (
@@ -653,6 +694,14 @@ export default function App() {
         domain={domain}
         lanIp={lanIp}
         onClose={() => setMobileConfigOpen(false)}
+      />
+
+      {/* Custom Domain Manager Modal */}
+      <DomainManagerModal
+        open={domainModalOpen}
+        currentDomain={domain}
+        onClose={() => setDomainModalOpen(false)}
+        onSaveDomain={setDomain}
       />
     </div>
   );
