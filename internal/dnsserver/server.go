@@ -169,6 +169,8 @@ func (s *Server) handleAuthoritativeLocal(
 	q dns.Question,
 	qName, domainFQDN, domainSuffix string,
 ) {
+	domain := strings.TrimSuffix(domainFQDN, ".")
+
 	m := new(dns.Msg)
 	m.SetReply(r)
 	m.Authoritative = true
