@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -35,27 +37,37 @@ type Service struct {
 
 // FileConfig is the on-disk YAML representation of lanname.yaml.
 type FileConfig struct {
-	Domain    string            `yaml:"domain" json:"domain"`
-	HTTPPort  int               `yaml:"http_port" json:"http_port"`
-	DNSPort   int               `yaml:"dns_port" json:"dns_port"`
-	NoDNS     bool              `yaml:"no_dns,omitempty" json:"no_dns,omitempty"`
-	NoHosts   bool              `yaml:"no_hosts,omitempty" json:"no_hosts,omitempty"`
-	Upstreams []string          `yaml:"upstreams,omitempty" json:"upstreams,omitempty"`
-	Services  map[string]string `yaml:"services" json:"services"`
+	InstanceID string            `yaml:"instance_id,omitempty" json:"instance_id,omitempty"`
+	Domain     string            `yaml:"domain" json:"domain"`
+	HTTPPort   int               `yaml:"http_port" json:"http_port"`
+	DNSPort    int               `yaml:"dns_port" json:"dns_port"`
+	NoDNS      bool              `yaml:"no_dns,omitempty" json:"no_dns,omitempty"`
+	NoHosts    bool              `yaml:"no_hosts,omitempty" json:"no_hosts,omitempty"`
+	Upstreams  []string          `yaml:"upstreams,omitempty" json:"upstreams,omitempty"`
+	Services   map[string]string `yaml:"services" json:"services"`
 }
 
 // Store holds the thread-safe runtime configuration and active service mappings.
 type Store struct {
-	mu        sync.RWMutex
-	path      string
-	domain    string
-	httpPort  int
-	dnsPort   int
-	noDNS     bool
-	noHosts   bool
-	upstreams []string
-	services  map[string]Service
-	onChange  []func()
+	mu         sync.RWMutex
+	path       string
+	instanceID string
+	domain     string
+	httpPort   int
+	dnsPort    int
+	noDNS      bool
+	noHosts    bool
+	upstreams  []string
+	services   map[string]Service
+	onChange   []func()
+}
+
+func generateInstanceID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "lanname-fallback-instance-id"
+	}
+	return "ln-" + hex.EncodeToString(b)
 }
 
 // NewStore creates a new thread-safe configuration store backed by path.
@@ -64,12 +76,13 @@ func NewStore(path string) *Store {
 		path = DefaultConfigPath
 	}
 	return &Store{
-		path:      path,
-		domain:    DefaultDomain,
-		httpPort:  DefaultHTTPPort,
-		dnsPort:   DefaultDNSPort,
-		upstreams: []string{"1.1.1.1:53", "8.8.8.8:53"},
-		services:  make(map[string]Service),
+		path:       path,
+		instanceID: generateInstanceID(),
+		domain:     DefaultDomain,
+		httpPort:   DefaultHTTPPort,
+		dnsPort:    DefaultDNSPort,
+		upstreams:  []string{"1.1.1.1:53", "8.8.8.8:53"},
+		services:   make(map[string]Service),
 	}
 }
 
@@ -107,6 +120,9 @@ func (s *Store) Load() error {
 		return fmt.Errorf("parse yaml %s: %w", s.path, err)
 	}
 
+	if strings.TrimSpace(fc.InstanceID) != "" {
+		s.instanceID = strings.TrimSpace(fc.InstanceID)
+	}
 	if fc.Domain != "" {
 		s.domain = NormalizeDomain(fc.Domain)
 	}
@@ -136,13 +152,14 @@ func (s *Store) Load() error {
 func (s *Store) Save() error {
 	s.mu.RLock()
 	fc := FileConfig{
-		Domain:    s.domain,
-		HTTPPort:  s.httpPort,
-		DNSPort:   s.dnsPort,
-		NoDNS:     s.noDNS,
-		NoHosts:   s.noHosts,
-		Upstreams: append([]string{}, s.upstreams...),
-		Services:  make(map[string]string, len(s.services)),
+		InstanceID: s.instanceID,
+		Domain:     s.domain,
+		HTTPPort:   s.httpPort,
+		DNSPort:    s.dnsPort,
+		NoDNS:      s.noDNS,
+		NoHosts:    s.noHosts,
+		Upstreams:  append([]string{}, s.upstreams...),
+		Services:   make(map[string]string, len(s.services)),
 	}
 	for k, v := range s.services {
 		fc.Services[k] = v.TargetURL
@@ -233,6 +250,13 @@ func (s *Store) List() []Service {
 		return out[i].Name < out[j].Name
 	})
 	return out
+}
+
+// InstanceID returns the unique cryptographic identifier of this lanname daemon instance.
+func (s *Store) InstanceID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.instanceID
 }
 
 // Domain returns the configured local domain suffix (without leading/trailing dots).

@@ -8,6 +8,9 @@ import {
   buildHostsBlock,
   generateMobileConfigXml,
   generateOfflineQrMatrix,
+  isPrivateLanIp,
+  verifyMutationRequestOrigin,
+  verifyDaemonIdentityProbe,
 } from './lannameCore';
 
 test('parseServicePair normalizes bare port, host:port, and full URLs', () => {
@@ -98,3 +101,47 @@ test('multi-domain support generates entries for all domains simultaneously', ()
   assert.ok(multiXml.includes('<string>lab</string>'));
   assert.ok(multiXml.includes('<string>local</string>'));
 });
+
+test('security guards: Private LAN ACL, CSRF/DNS-rebinding check, and Android Evil-Twin identity verification', () => {
+  assert.equal(isPrivateLanIp('192.168.1.159'), true);
+  assert.equal(isPrivateLanIp('fd00::1'), true);
+  assert.equal(isPrivateLanIp('8.8.8.8'), false);
+
+  const validOrigin = verifyMutationRequestOrigin({
+    hostHeader: 'cofy.local',
+    originHeader: 'http://cofy.local',
+    secFetchSite: 'same-origin',
+    lanIp: '192.168.1.159',
+    domain: 'cofy',
+  });
+  assert.equal(validOrigin.allowed, true);
+
+  const csrfAttack = verifyMutationRequestOrigin({
+    hostHeader: '192.168.1.159',
+    originHeader: 'https://evil.example.com',
+    secFetchSite: 'cross-site',
+    lanIp: '192.168.1.159',
+    domain: 'cofy',
+  });
+  assert.equal(csrfAttack.allowed, false);
+
+  const rebindAttack = verifyMutationRequestOrigin({
+    hostHeader: 'attacker-rebind.com',
+    lanIp: '192.168.1.159',
+    domain: 'cofy',
+  });
+  assert.equal(rebindAttack.allowed, false);
+
+  const genuineDaemon = verifyDaemonIdentityProbe({
+    txtRecords: ['lanname-daemon=active', 'lanname-instance=ln-abc123'],
+    expectedInstanceId: 'ln-abc123',
+  });
+  assert.equal(genuineDaemon.verified, true);
+
+  const evilTwin = verifyDaemonIdentityProbe({
+    txtRecords: ['lanname-daemon=active', 'lanname-instance=ln-rogue999'],
+    expectedInstanceId: 'ln-abc123',
+  });
+  assert.equal(evilTwin.verified, false);
+});
+

@@ -431,28 +431,31 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
             </div>
           </section>
 
-          {/* Non-Technical Features Cheat Sheet */}
+          {/* Non-Technical Features & Security Guardrails Cheat Sheet */}
           <section className="rounded-xl border border-slate-800 bg-[#111827] p-6">
             <h4 className="text-base font-bold text-white">
-              Built-In Guardrails to Prevent Headaches
+              Built-In Security &amp; Reliability Guardrails
             </h4>
+            <p className="mt-1 text-xs text-slate-400">
+              Engineered so both the Go daemon and the Android <code className="text-sky-400">VpnService</code> Split-DNS companion are safe on home and public Wi-Fi networks.
+            </p>
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div className="rounded-lg border border-slate-800 bg-[#0b0f19] p-4">
-                <div className="text-xs font-bold text-white">Unprivileged Fallback</div>
+                <div className="text-xs font-bold text-emerald-400">Anti-Evil-Twin Identity Probe</div>
                 <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-                  If run without root or admin rights, <code className="text-slate-300">lanname</code> gracefully falls back to non-root ports (e.g. 8080) instead of crashing with a confusing permission error.
+                  Before the Android <code className="text-slate-300">VpnService</code> companion activates on any Wi-Fi network, it verifies your daemon&apos;s cryptographic <code className="text-slate-300">instance_id</code> via <code className="text-slate-300">TXT _lanname.{domain}</code>. Joining a coffee-shop <code className="text-slate-300">192.168.1.x</code> network never hijacks your DNS.
                 </p>
               </div>
               <div className="rounded-lg border border-slate-800 bg-[#0b0f19] p-4">
-                <div className="text-xs font-bold text-white">Self-Healing 502 Page</div>
+                <div className="text-xs font-bold text-sky-400">CSRF &amp; DNS-Rebinding Guard</div>
                 <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-                  If an app container is restarting, you won&apos;t get a broken white screen. A friendly page automatically polls the port and reloads the second the service comes back online.
+                  Dashboard mutations (<code className="text-slate-300">POST/DELETE /api/services</code>) enforce strict <code className="text-slate-300">Sec-Fetch-Site: same-origin</code> and <code className="text-slate-300">Host</code> allowlist checks so external websites cannot modify your LAN routes.
                 </p>
               </div>
               <div className="rounded-lg border border-slate-800 bg-[#0b0f19] p-4">
-                <div className="text-xs font-bold text-white">Clean Shutdown</div>
+                <div className="text-xs font-bold text-purple-400">Private LAN ACL (Port 53)</div>
                 <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-                  When you stop the daemon, it cleanly removes its temporary entries from <code className="text-slate-300">/etc/hosts</code> so your computer never keeps stale mappings.
+                  Unicast DNS strictly enforces an RFC 1918 / IPv6 ULA source IP allowlist (<code className="text-slate-300">isPrivateOrLocalClient</code>), returning <code className="text-slate-300">REFUSED</code> if a router ever exposes port 53 via UPnP.
                 </p>
               </div>
             </div>
@@ -462,3 +465,4 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
     </div>
   );
 };
+

@@ -10,6 +10,7 @@ import dnsServerGoRaw from '../../internal/dnsserver/server.go?raw';
 import hostsGoRaw from '../../internal/hosts/hosts.go?raw';
 import proxyGoRaw from '../../internal/proxy/proxy.go?raw';
 import dashboardGoRaw from '../../internal/dashboard/dashboard.go?raw';
+import androidVpnKtRaw from '../../android/LannameVpnService.kt?raw';
 import readmeMdRaw from '../../README.md?raw';
 
 export interface GoSourceFileEntry {
@@ -35,7 +36,7 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
   {
     path: 'internal/config/config.go',
     packageName: 'config',
-    summary: 'Atomic YAML load/save, CLI name=target parser, and thread-safe state store with change hooks',
+    summary: 'Atomic YAML load/save, cryptographic InstanceID generator, CLI name=target parser, and thread-safe state store',
     content: configGoRaw,
   },
   {
@@ -71,7 +72,7 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
   {
     path: 'internal/dnsserver/server.go',
     packageName: 'dnsserver',
-    summary: 'Authoritative UDP/TCP 53 *.domain responder, Browser DoH Canary NXDOMAIN blocker, and upstream forwarder',
+    summary: 'Authoritative UDP/TCP 53 *.domain responder, Private LAN ACL, _lanname.<domain> TXT identity probe, and DoH canary blocker',
     content: dnsServerGoRaw,
   },
   {
@@ -89,8 +90,14 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
   {
     path: 'internal/dashboard/dashboard.go',
     packageName: 'dashboard',
-    summary: 'Live Web Hub, /api/services REST endpoints, offline QR generator, and iOS .mobileconfig XML profile builder',
+    summary: 'Live Web Hub, /api/identity & CSRF-hardened /api/services endpoints, offline QR generator, and iOS .mobileconfig builder',
     content: dashboardGoRaw,
+  },
+  {
+    path: 'android/LannameVpnService.kt',
+    packageName: 'companion',
+    summary: 'Android VpnService Split-DNS shim with Evil-Twin cryptographic identity verification and Wi-Fi NetworkCallback auto-teardown',
+    content: androidVpnKtRaw,
   },
   {
     path: 'README.md',
@@ -99,3 +106,4 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
     content: readmeMdRaw,
   },
 ];
+

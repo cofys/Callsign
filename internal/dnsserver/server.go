@@ -48,16 +48,22 @@ func New(store *config.Store, lanIP net.IP) *Server {
 	}
 }
 
-// Start binds UDP and TCP listeners on <LAN_IP>:<dnsPort> and attempts 127.0.0.1:<dnsPort>
-// (gracefully continuing if 127.0.0.1:53 is already in use or if unprivileged).
+// Start binds UDP and TCP listeners on <LAN_IP>:<dnsPort>, 127.0.0.1:<dnsPort>,
+// and dual-stack IPv6 [::1]:<dnsPort> (gracefully continuing if an address is already in use).
 func (s *Server) Start(ctx context.Context) ([]string, error) {
 	port := s.store.DNSPort()
-	candidates := []string{
-		fmt.Sprintf("%s:%d", s.lanIP.String(), port),
+	type listenTarget struct {
+		udpNet string
+		tcpNet string
+		addr   string
+	}
+	candidates := []listenTarget{
+		{udpNet: "udp4", tcpNet: "tcp4", addr: fmt.Sprintf("%s:%d", s.lanIP.String(), port)},
 	}
 	if s.lanIP.String() != "127.0.0.1" {
-		candidates = append(candidates, fmt.Sprintf("127.0.0.1:%d", port))
+		candidates = append(candidates, listenTarget{udpNet: "udp4", tcpNet: "tcp4", addr: fmt.Sprintf("127.0.0.1:%d", port)})
 	}
+	candidates = append(candidates, listenTarget{udpNet: "udp6", tcpNet: "tcp6", addr: fmt.Sprintf("[::1]:%d", port)})
 
 	mux := dns.NewServeMux()
 	mux.HandleFunc(".", s.serveDNS)
@@ -65,15 +71,15 @@ func (s *Server) Start(ctx context.Context) ([]string, error) {
 	var bound []string
 	var firstErr error
 
-	for _, addr := range candidates {
-		udpConn, err := net.ListenPacket("udp4", addr)
+	for _, c := range candidates {
+		udpConn, err := net.ListenPacket(c.udpNet, c.addr)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
-		tcpLn, tcpErr := net.Listen("tcp4", addr)
+		tcpLn, tcpErr := net.Listen(c.tcpNet, c.addr)
 		if tcpErr != nil {
 			_ = udpConn.Close()
 			if firstErr == nil {
@@ -95,10 +101,10 @@ func (s *Server) Start(ctx context.Context) ([]string, error) {
 
 		s.mu.Lock()
 		s.dnsServers = append(s.dnsServers, udpSrv, tcpSrv)
-		s.boundAddrs = append(s.boundAddrs, addr)
+		s.boundAddrs = append(s.boundAddrs, c.addr)
 		s.mu.Unlock()
 
-		bound = append(bound, addr)
+		bound = append(bound, c.addr)
 
 		go func(srv *dns.Server) {
 			_ = srv.ActivateAndServe()
@@ -127,8 +133,34 @@ func (s *Server) BoundAddrs() []string {
 	return append([]string{}, s.boundAddrs...)
 }
 
+// isPrivateOrLocalClient enforces a strict Private LAN ACL so that even if a router
+// accidentally exposes port 53 via UPnP or DMZ, the daemon refuses public internet queries
+// and cannot be abused as an open DNS amplification resolver.
+func isPrivateOrLocalClient(addr net.Addr) bool {
+	if addr == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		host = addr.String()
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
 func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 	if len(r.Question) == 0 {
+		return
+	}
+
+	// Security Hardening: Reject queries originating outside RFC1918 / IPv6 ULA / Loopback / Link-Local
+	if !isPrivateOrLocalClient(w.RemoteAddr()) {
+		refused := new(dns.Msg)
+		refused.SetRcode(r, dns.RcodeRefused)
+		_ = w.WriteMsg(refused)
 		return
 	}
 
@@ -176,21 +208,28 @@ func (s *Server) handleAuthoritativeLocal(
 	m.Authoritative = true
 	m.RecursionAvailable = true
 
+	// Cryptographic Instance Identity Probe: _lanname.<domain>. or _lanname.local.
+	// Used by the Android VpnService companion app to verify this host is the user's
+	// genuine lanname daemon and not a rogue/colliding 192.168.1.x IP on public Wi-Fi.
+	isIdentityProbe := qName == "_lanname."+domainFQDN || qName == "_lanname.local."
+
 	// Determine whether the queried name matches the base hub (<domain>.) or a known service (<svc>.<domain>.)
-	isKnown := false
-	if qName == domainFQDN || qName == domain+".local." {
-		isKnown = true
-	} else if strings.HasSuffix(qName, domainSuffix) {
-		sub := strings.TrimSuffix(qName, domainSuffix)
-		if _, ok := s.store.Get(sub); ok {
+	isKnown := isIdentityProbe
+	if !isKnown {
+		if qName == domainFQDN || qName == domain+".local." {
 			isKnown = true
-		}
-	} else if strings.HasSuffix(qName, ".local.") {
-		sub := strings.TrimSuffix(qName, ".local.")
-		if sub == domain {
-			isKnown = true
-		} else if _, ok := s.store.Get(sub); ok {
-			isKnown = true
+		} else if strings.HasSuffix(qName, domainSuffix) {
+			sub := strings.TrimSuffix(qName, domainSuffix)
+			if _, ok := s.store.Get(sub); ok {
+				isKnown = true
+			}
+		} else if strings.HasSuffix(qName, ".local.") {
+			sub := strings.TrimSuffix(qName, ".local.")
+			if sub == domain {
+				isKnown = true
+			} else if _, ok := s.store.Get(sub); ok {
+				isKnown = true
+			}
 		}
 	}
 
@@ -228,7 +267,11 @@ func (s *Server) handleAuthoritativeLocal(
 				Class:  dns.ClassINET,
 				Ttl:    localRecordTTL,
 			},
-			Txt: []string{"lanname-daemon=active"},
+			Txt: []string{
+				"lanname-daemon=active",
+				"lanname-instance=" + s.store.InstanceID(),
+				"lanname-domain=" + domain,
+			},
 		})
 	default:
 		m.Rcode = dns.RcodeSuccess

@@ -99,6 +99,8 @@ func (h *Handler) probeAll() {
 // ServeHTTP dispatches dashboard UI and API routes.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case r.URL.Path == "/api/identity" && r.Method == http.MethodGet:
+		h.handleGetIdentity(w, r)
 	case r.URL.Path == "/api/status" && r.Method == http.MethodGet:
 		h.handleGetStatus(w, r)
 	case r.URL.Path == "/api/services" && r.Method == http.MethodGet:
@@ -112,6 +114,58 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.handleIndexHTML(w, r)
 	}
+}
+
+// isAllowedMutationRequest defends against CSRF and DNS-Rebinding attacks from external websites
+// when a user's browser is on the home LAN.
+func (h *Handler) isAllowedMutationRequest(r *http.Request) bool {
+	// 1. Reject cross-site fetch metadata
+	secFetch := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")))
+	if secFetch != "" && secFetch != "same-origin" && secFetch != "none" {
+		return false
+	}
+
+	// 2. Validate Host header against allowed local hub names/IPs (prevents DNS rebinding)
+	host := strings.ToLower(strings.TrimSpace(r.Host))
+	if hName, _, err := net.SplitHostPort(host); err == nil {
+		host = hName
+	}
+	domain := h.store.Domain()
+	allowedHost := host == "127.0.0.1" ||
+		host == "localhost" ||
+		host == h.lanIP.String() ||
+		host == domain ||
+		host == domain+".local"
+	if !allowedHost {
+		return false
+	}
+
+	// 3. If Origin header is present, ensure its hostname matches the validated Host
+	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+		originHost := strings.ToLower(origin)
+		originHost = strings.TrimPrefix(originHost, "http://")
+		originHost = strings.TrimPrefix(originHost, "https://")
+		if oName, _, err := net.SplitHostPort(originHost); err == nil {
+			originHost = oName
+		}
+		if originHost != host {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (h *Handler) handleGetIdentity(w http.ResponseWriter, r *http.Request) {
+	payload := map[string]any{
+		"instanceId": h.store.InstanceID(),
+		"domain":     h.store.Domain(),
+		"lanIp":      h.lanIP.String(),
+		"dnsPort":    h.store.DNSPort(),
+		"httpPort":   h.store.HTTPPort(),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 // Snapshot builds the current list of services and their health statuses.
@@ -150,17 +204,23 @@ func (h *Handler) Snapshot() []ServiceStatus {
 func (h *Handler) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	h.probeAll()
 	payload := map[string]any{
-		"domain":   h.store.Domain(),
-		"lanIp":    h.lanIP.String(),
-		"httpPort": h.store.HTTPPort(),
-		"dnsPort":  h.store.DNSPort(),
-		"services": h.Snapshot(),
+		"instanceId": h.store.InstanceID(),
+		"domain":     h.store.Domain(),
+		"lanIp":      h.lanIP.String(),
+		"httpPort":   h.store.HTTPPort(),
+		"dnsPort":    h.store.DNSPort(),
+		"services":   h.Snapshot(),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func (h *Handler) handleAddService(w http.ResponseWriter, r *http.Request) {
+	if !h.isAllowedMutationRequest(r) {
+		http.Error(w, `{"error":"forbidden cross-origin or invalid host mutation"}`, http.StatusForbidden)
+		return
+	}
+
 	var body struct {
 		Name   string `json:"name"`
 		Target string `json:"target"`
@@ -199,6 +259,11 @@ func (h *Handler) handleAddService(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleDeleteService(w http.ResponseWriter, r *http.Request) {
+	if !h.isAllowedMutationRequest(r) {
+		http.Error(w, `{"error":"forbidden cross-origin or invalid host mutation"}`, http.StatusForbidden)
+		return
+	}
+
 	name := strings.TrimPrefix(r.URL.Path, "/api/services/")
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {

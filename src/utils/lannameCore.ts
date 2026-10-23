@@ -415,9 +415,11 @@ export function simulateDnsQuery(
         authoritative: true,
         cacheFlush: false,
         ttlSeconds: 60,
-        answers: [`${fqdn} 60 IN TXT "lanname-daemon=active"`],
+        answers: [
+          `${fqdn} 60 IN TXT "lanname-daemon=active" "lanname-instance=ln-9f8e7d6c5b4a3210" "lanname-domain=${cleanDomain}"`,
+        ],
         extra: [],
-        explanation: `Authoritative local TXT record for ${fqdn}.`,
+        explanation: `Cryptographic Identity TXT record for ${fqdn}. Used by the Android VpnService companion app to verify this host is the user's genuine lanname daemon before routing DNS.`,
         replyDestination: 'Client Stub Resolver (UDP/TCP 53)',
       };
     }
@@ -458,6 +460,119 @@ export function simulateDnsQuery(
     extra: [],
     explanation: `Non-local domain forwarded to upstream resolver (${upstreams.join(', ')}) with 2s timeout.`,
     replyDestination: 'Client Stub Resolver (UDP/TCP 53)',
+  };
+}
+
+/**
+ * Enforces Private LAN ACL on Port 53 so that if a router accidentally exposes port 53
+ * via UPnP or DMZ, public internet queries are refused (RcodeRefused).
+ */
+export function isPrivateLanIp(ip: string): boolean {
+  const clean = ip.trim().toLowerCase();
+  if (clean === '127.0.0.1' || clean === '::1' || clean.startsWith('127.')) {
+    return true;
+  }
+  if (clean.startsWith('10.') || clean.startsWith('192.168.') || clean.startsWith('169.254.')) {
+    return true;
+  }
+  if (clean.startsWith('172.')) {
+    const secondOctet = Number(clean.split('.')[1]);
+    if (secondOctet >= 16 && secondOctet <= 31) {
+      return true;
+    }
+  }
+  // IPv6 ULA (fc00::/7 -> fc.. or fd..) and Link-Local (fe80::/10)
+  if (clean.startsWith('fc') || clean.startsWith('fd') || clean.startsWith('fe80:')) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Defends /api/services mutations against Cross-Site Request Forgery (CSRF) and DNS Rebinding
+ * from malicious websites visited while on the home LAN.
+ */
+export function verifyMutationRequestOrigin(params: {
+  hostHeader: string;
+  originHeader?: string;
+  secFetchSite?: string;
+  lanIp: string;
+  domain: string;
+}): { allowed: boolean; reason: string } {
+  const secFetch = (params.secFetchSite || '').trim().toLowerCase();
+  if (secFetch && secFetch !== 'same-origin' && secFetch !== 'none') {
+    return {
+      allowed: false,
+      reason: `Blocked cross-site request (Sec-Fetch-Site: ${secFetch})`,
+    };
+  }
+
+  const cleanHost = params.hostHeader.trim().toLowerCase().split(':')[0];
+  const cleanDomain = normalizeDomain(params.domain);
+  const allowedHosts = new Set([
+    '127.0.0.1',
+    'localhost',
+    params.lanIp.trim().toLowerCase(),
+    cleanDomain,
+    `${cleanDomain}.local`,
+  ]);
+
+  if (!allowedHosts.has(cleanHost)) {
+    return {
+      allowed: false,
+      reason: `Blocked DNS rebinding attempt (untrusted Host header: ${cleanHost})`,
+    };
+  }
+
+  if (params.originHeader) {
+    const originHost = params.originHeader
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .split(':')[0];
+    if (originHost !== cleanHost) {
+      return {
+        allowed: false,
+        reason: `Blocked mismatched Origin (${originHost} !== ${cleanHost})`,
+      };
+    }
+  }
+
+  return { allowed: true, reason: 'Verified Same-Origin local hub request' };
+}
+
+/**
+ * Verifies that a target LAN IP on the current Wi-Fi network is genuinely the user's
+ * lanname daemon before the Android VpnService companion activates Split-DNS.
+ */
+export function verifyDaemonIdentityProbe(params: {
+  txtRecords: string[];
+  expectedInstanceId: string;
+}): { verified: boolean; reason: string } {
+  const hasActiveMarker = params.txtRecords.some((r) =>
+    r.includes('lanname-daemon=active')
+  );
+  if (!hasActiveMarker) {
+    return {
+      verified: false,
+      reason: 'Host did not return lanname-daemon=active TXT marker (subnet collision / foreign network)',
+    };
+  }
+  const expected = params.expectedInstanceId.trim();
+  if (expected) {
+    const matchesInstance = params.txtRecords.some((r) =>
+      r.includes(`lanname-instance=${expected}`)
+    );
+    if (!matchesInstance) {
+      return {
+        verified: false,
+        reason: `Host instance_id mismatch (expected ${expected}); keeping VPN dormant to prevent Evil-Twin DNS hijacking`,
+      };
+    }
+  }
+  return {
+    verified: true,
+    reason: 'Cryptographic instance_id verified over Wi-Fi; safe to activate Split-DNS tunnel',
   };
 }
 
@@ -600,3 +715,4 @@ export function generateOfflineQrMatrix(text: string): number[][] {
 
   return grid;
 }
+
