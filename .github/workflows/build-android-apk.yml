@@ -26,10 +26,10 @@ jobs:
         run: |
           gradle wrapper --gradle-version 8.7
           ./gradlew assembleRelease
-          cp build/outputs/apk/release/*.apk ../lanname-companion-universal.apk
+          cp build/outputs/apk/release/*.apk ../callsign-companion-universal.apk
 
       - name: Upload Universal APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lanname-companion-universal-apk
-          path: lanname-companion-universal.apk
+          name: callsign-companion-universal-apk
+          path: callsign-companion-universal.apk

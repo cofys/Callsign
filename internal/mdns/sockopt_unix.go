@@ -7,7 +7,7 @@ import (
 )
 
 // SO_REUSEPORT value is 0x0f (15) on Linux asm-generic and 0x0200 (512) on Darwin/BSD.
-// Setting both SO_REUSEADDR and SO_REUSEPORT allows lanname to coexist peacefully
+// Setting both SO_REUSEADDR and SO_REUSEPORT allows Callsign to coexist peacefully
 // with avahi-daemon (Linux) and mDNSResponder (macOS) on UDP port 5353.
 func reusePortControl(network, address string, c syscall.RawConn) error {
 	var sockErr error

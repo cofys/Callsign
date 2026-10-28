@@ -58,9 +58,8 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	host := stripPort(r.Host)
 	domain := rt.store.Domain()
 
-	// Always allow direct access to the health check ping endpoint for 502 auto-retry polling
-	// (supports /__callsign_ping and legacy /__lanname_ping alias).
-	if r.URL.Path == "/__callsign_ping" || r.URL.Path == "/__lanname_ping" {
+	// Always allow direct access to the health check ping endpoint for 502 auto-retry polling.
+	if r.URL.Path == "/__callsign_ping" {
 		rt.handleUpstreamPing(w, r, host, domain)
 		return
 	}

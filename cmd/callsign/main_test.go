@@ -140,12 +140,11 @@ func TestMCPHTTPTransportAndHostIsolation(t *testing.T) {
 	}
 }
 
-func TestLegacyLannameYamlMigrationAndPingAlias(t *testing.T) {
+func TestCallsignConfigAndPing(t *testing.T) {
 	tmpDir := t.TempDir()
-	legacyPath := filepath.Join(tmpDir, "lanname.yaml")
-	newPath := filepath.Join(tmpDir, "callsign.yaml")
+	configPath := filepath.Join(tmpDir, "callsign.yaml")
 
-	legacyYAML := `instance_id: ln-legacy123456
+	configYAML := `instance_id: cs-test123456
 domain: home
 http_port: 8080
 dns_port: 5354
@@ -153,51 +152,47 @@ services:
   plex: http://127.0.0.1:32400
   ha: http://127.0.0.1:8123
 `
-	if err := os.WriteFile(legacyPath, []byte(legacyYAML), 0o644); err != nil {
-		t.Fatalf("write legacy lanname.yaml: %v", err)
+	if err := os.WriteFile(configPath, []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("write callsign.yaml: %v", err)
 	}
 
-	store := config.NewStore(newPath)
+	store := config.NewStore(configPath)
 	if err := store.Load(); err != nil {
-		t.Fatalf("Load() failed on legacy lanname.yaml: %v", err)
+		t.Fatalf("Load() failed on callsign.yaml: %v", err)
 	}
 
 	if store.Domain() != "home" {
-		t.Fatalf("expected migrated domain 'home', got %q", store.Domain())
+		t.Fatalf("expected domain 'home', got %q", store.Domain())
 	}
-	if store.InstanceID() != "ln-legacy123456" {
-		t.Fatalf("expected migrated instance_id 'ln-legacy123456', got %q", store.InstanceID())
+	if store.InstanceID() != "cs-test123456" {
+		t.Fatalf("expected instance_id 'cs-test123456', got %q", store.InstanceID())
 	}
 	if _, ok := store.Get("plex"); !ok {
-		t.Fatalf("expected migrated service 'plex' to exist")
+		t.Fatalf("expected service 'plex' to exist")
 	}
 
-	// Verify callsign.yaml was saved to disk
-	if _, err := os.Stat(newPath); err != nil {
-		t.Fatalf("expected migrated callsign.yaml to be written to disk, stat err: %v", err)
-	}
-
-	// Verify both /__callsign_ping and /__lanname_ping work on proxy.Router
+	// Verify /__callsign_ping works on proxy.Router
 	lanIP := net.ParseIP("192.168.1.159")
 	dash := dashboard.NewHandler(store, lanIP)
 	defer dash.Close()
 	router := proxy.NewRouter(store, lanIP, dash)
 
-	for _, endpoint := range []string{"/__callsign_ping?service=plex", "/__lanname_ping?service=plex"} {
-		req := httptest.NewRequest(http.MethodGet, "http://plex.home"+endpoint, nil)
-		req.Host = "plex.home"
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
+	req := httptest.NewRequest(http.MethodGet, "http://plex.home/__callsign_ping?service=plex", nil)
+	req.Host = "plex.home"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
 
-		var resp map[string]bool
-		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-			t.Fatalf("endpoint %s returned non-JSON %q: %v", endpoint, rec.Body.String(), err)
-		}
+	var resp map[string]bool
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("endpoint /__callsign_ping returned non-JSON %q: %v", rec.Body.String(), err)
 	}
 
-	// Verify iOS mobileconfig preserves io.lanname.* payload identifiers
+	// Verify Apple mobileconfig uses dev.callsign.* identifiers
 	xml := dashboard.GenerateMobileConfigXML("x", "192.168.1.159")
-	if !strings.Contains(xml, "io.lanname.dns.x.settings") || !strings.Contains(xml, "io.lanname.profile.x") {
-		t.Fatalf("expected mobileconfig XML to preserve io.lanname.* identifiers, got: %s", xml)
+	if !strings.Contains(xml, "dev.callsign.dns.x.settings") || !strings.Contains(xml, "dev.callsign.profile.x") {
+		t.Fatalf("expected mobileconfig XML to use dev.callsign.* identifiers, got: %s", xml)
+	}
+	if strings.Contains(strings.ToLower(xml), "lanname") {
+		t.Fatalf("expected mobileconfig XML to have zero occurrences of lanname, got: %s", xml)
 	}
 }

@@ -138,7 +138,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleDeleteService(w, r)
 	case r.URL.Path == "/setup/ios.mobileconfig" && r.Method == http.MethodGet:
 		h.handleIOSMobileConfig(w, r)
-	case (r.URL.Path == "/setup/callsign-companion.apk" || r.URL.Path == "/setup/lanname-companion.apk") && r.Method == http.MethodGet:
+	case r.URL.Path == "/setup/callsign-companion.apk" && r.Method == http.MethodGet:
 		h.handleAndroidCompanionAPK(w, r)
 	default:
 		h.handleIndexHTML(w, r)
@@ -330,13 +330,8 @@ func GenerateMobileConfigXML(domain, lanIP string) string {
 		cleanDomain = "lan"
 	}
 
-	// COMPATIBILITY NOTE: Do NOT change the "lanname-*" UUID seeds or the
-	// "io.lanname.dns.*" / "io.lanname.profile.*" PayloadIdentifier strings below.
-	// They are internal Apple Configuration Profile plumbing; changing them would
-	// orphan profiles already installed on users' iPhones, iPads, and Macs instead
-	// of cleanly updating them in place.
-	outerUUID := deterministicUUID("lanname-profile-" + cleanDomain + "-" + lanIP)
-	innerUUID := deterministicUUID("lanname-dns-payload-" + cleanDomain + "-" + lanIP)
+	outerUUID := deterministicUUID("callsign-profile-" + cleanDomain + "-" + lanIP)
+	innerUUID := deterministicUUID("callsign-dns-payload-" + cleanDomain + "-" + lanIP)
 
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -364,7 +359,7 @@ func GenerateMobileConfigXML(domain, lanIP string) string {
 			<key>PayloadDisplayName</key>
 			<string>Callsign (.%s Split-DNS)</string>
 			<key>PayloadIdentifier</key>
-			<string>io.lanname.dns.%s.settings</string>
+			<string>dev.callsign.dns.%s.settings</string>
 			<key>PayloadType</key>
 			<string>com.apple.dnsSettings.managed</string>
 			<key>PayloadUUID</key>
@@ -378,7 +373,7 @@ func GenerateMobileConfigXML(domain, lanIP string) string {
 	<key>PayloadDisplayName</key>
 	<string>Callsign — .%s Local Domain</string>
 	<key>PayloadIdentifier</key>
-	<string>io.lanname.profile.%s</string>
+	<string>dev.callsign.profile.%s</string>
 	<key>PayloadOrganization</key>
 	<string>Callsign</string>
 	<key>PayloadRemovalDisallowed</key>
@@ -431,7 +426,7 @@ func (h *Handler) handleAndroidCompanionAPK(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 
 	// If a pre-built universal APK exists alongside the daemon, serve it directly:
-	for _, candidate := range []string{"callsign-companion-universal.apk", "lanname-companion-universal.apk"} {
+	for _, candidate := range []string{"callsign-companion-universal.apk"} {
 		if rawApk, err := os.ReadFile(candidate); err == nil && len(rawApk) > 0 {
 			_, _ = w.Write(rawApk)
 			return

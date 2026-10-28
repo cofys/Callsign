@@ -57,8 +57,7 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
     e.preventDefault();
     const raw = cliInput.trim();
     const tokens = raw.split(/\s+/);
-    const isBinaryPrefix =
-      tokens[0] === 'callsign' || tokens[0] === 'lanname';
+    const isBinaryPrefix = tokens[0] === 'callsign';
     const cmd = isBinaryPrefix ? tokens[1] || 'help' : tokens[0];
 
     if (cmd === 'ls' || cmd === 'list' || cmd === 'status') {

@@ -232,8 +232,7 @@ func (s *Server) handleAuthoritativeLocal(
 	m.RecursionAvailable = true
 
 	// Cryptographic Instance Identity Probe: _callsign.<domain>. or _callsign.local.
-	isIdentityProbe := qName == "_callsign."+domainFQDN || qName == "_callsign.local." ||
-		qName == "_lanname."+domainFQDN || qName == "_lanname.local."
+	isIdentityProbe := qName == "_callsign."+domainFQDN || qName == "_callsign.local."
 
 	isKnown := isIdentityProbe
 	if !isKnown {

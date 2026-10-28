@@ -206,10 +206,10 @@ class CallsignVpnService : VpnService() {
         val txtRecords = queryDnsTxtOverWifi(wifiNetwork, daemonIp, "_callsign.$domain")
         if (txtRecords.isNotEmpty()) {
             val hasActiveMarker = txtRecords.any {
-                it.contains("callsign-daemon=active") || it.contains("lanname-daemon=active")
+                it.contains("callsign-daemon=active")
             }
             val matchesInstance = expectedId.isEmpty() || txtRecords.any {
-                it.contains("callsign-instance=$expectedId") || it.contains("lanname-instance=$expectedId")
+                it.contains("callsign-instance=$expectedId")
             }
             if (hasActiveMarker && matchesInstance) {
                 return true

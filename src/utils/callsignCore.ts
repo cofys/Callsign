@@ -663,7 +663,7 @@ export function verifyDaemonIdentityProbe(params: {
   expectedInstanceId: string;
 }): { verified: boolean; reason: string } {
   const hasActiveMarker = params.txtRecords.some(
-    (r) => r.includes('callsign-daemon=active') || r.includes('lanname-daemon=active')
+    (r) => r.includes('callsign-daemon=active')
   );
   if (!hasActiveMarker) {
     return {
@@ -674,9 +674,7 @@ export function verifyDaemonIdentityProbe(params: {
   const expected = params.expectedInstanceId.trim();
   if (expected) {
     const matchesInstance = params.txtRecords.some(
-      (r) =>
-        r.includes(`callsign-instance=${expected}`) ||
-        r.includes(`lanname-instance=${expected}`)
+      (r) => r.includes(`callsign-instance=${expected}`)
     );
     if (!matchesInstance) {
       return {
@@ -752,7 +750,7 @@ ${matchDomainsXml}
 			<key>PayloadDisplayName</key>
 			<string>Callsign (.${primaryDomain} Split-DNS)</string>
 			<key>PayloadIdentifier</key>
-			<string>io.lanname.dns.${primaryDomain}.settings</string>
+			<string>dev.callsign.dns.${primaryDomain}.settings</string>
 			<key>PayloadType</key>
 			<string>com.apple.dnsSettings.managed</string>
 			<key>PayloadUUID</key>
@@ -766,7 +764,7 @@ ${matchDomainsXml}
 	<key>PayloadDisplayName</key>
 	<string>Callsign — .${primaryDomain} Local Domain</string>
 	<key>PayloadIdentifier</key>
-	<string>io.lanname.profile.${primaryDomain}</string>
+	<string>dev.callsign.profile.${primaryDomain}</string>
 	<key>PayloadOrganization</key>
 	<string>Callsign</string>
 	<key>PayloadRemovalDisallowed</key>

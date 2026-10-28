@@ -20,7 +20,6 @@ import (
 
 const (
 	DefaultConfigPath = "callsign.yaml"
-	LegacyConfigPath  = "lanname.yaml"
 	DefaultDomain     = "x"
 	DefaultHTTPPort   = 80
 	DefaultDNSPort    = 53
@@ -104,26 +103,16 @@ func (s *Store) notify() {
 }
 
 // Load reads the YAML configuration from disk if it exists.
-// If callsign.yaml does not exist but a legacy lanname.yaml exists in the same
-// directory, Load reads lanname.yaml and saves it as callsign.yaml.
 func (s *Store) Load() error {
 	s.mu.Lock()
 	data, err := os.ReadFile(s.path)
-	migratedFromLegacy := false
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			legacyPath := filepath.Join(filepath.Dir(s.path), LegacyConfigPath)
-			if legacyData, legacyErr := os.ReadFile(legacyPath); legacyErr == nil {
-				data = legacyData
-				migratedFromLegacy = true
-			} else {
-				s.mu.Unlock()
-				return nil
-			}
-		} else {
 			s.mu.Unlock()
-			return fmt.Errorf("read config %s: %w", s.path, err)
+			return nil
 		}
+		s.mu.Unlock()
+		return fmt.Errorf("read config %s: %w", s.path, err)
 	}
 
 	var fc FileConfig
@@ -159,10 +148,6 @@ func (s *Store) Load() error {
 		s.services[svc.Name] = svc
 	}
 	s.mu.Unlock()
-
-	if migratedFromLegacy {
-		_ = s.Save()
-	}
 	return nil
 }
 
