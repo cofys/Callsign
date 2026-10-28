@@ -15,6 +15,15 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import java.net.URL
+import java.util.Collections
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorCompletionService
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * MainActivity: Dummy-proof 1-Button Android UI for the `Callsign` Split-DNS Companion APK.
@@ -39,6 +48,9 @@ class MainActivity : Activity() {
     private lateinit var domainInput: EditText
     private lateinit var statusLabel: TextView
     private lateinit var toggleButton: Button
+    private lateinit var discoverButton: Button
+
+    private val scanExecutor = Executors.newCachedThreadPool()
 
     private var isVpnEnabled = false
     private var expectedInstanceId = ""
@@ -150,6 +162,11 @@ class MainActivity : Activity() {
         }
         card.addView(ipLabel)
 
+        // IP field + Auto-Discover button on one row: users who don't know the
+        // daemon's IP tap the button and the app scans this Wi-Fi for it.
+        val ipRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
         ipInput = EditText(this).apply {
             setText(initialIp)
             setTextColor(Color.WHITE)
@@ -157,10 +174,32 @@ class MainActivity : Activity() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             typeface = Typeface.MONOSPACE
         }
-        card.addView(ipInput)
+        ipRow.addView(
+            ipInput,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        discoverButton = Button(this).apply {
+            text = "Auto-Discover"
+            isAllCaps = false
+            setTextColor(Color.parseColor("#38BDF8"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1E293B"))
+                cornerRadius = dp(10).toFloat()
+            }
+            setOnClickListener { discoverDaemon() }
+        }
+        ipRow.addView(
+            discoverButton,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = dp(8) }
+        )
+        card.addView(ipRow)
 
         val domainLabel = TextView(this).apply {
-            text = "Custom Domain Ending (without dot)"
+            text = "Custom Domain Ending (without dot; comma-separate for multiple)"
             setTextColor(Color.parseColor("#CBD5E1"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             setPadding(0, dp(12), 0, 0)
@@ -225,9 +264,18 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
+    /** "cofy, proj" / ".Cofy." -> ["cofy", "proj"] — the domain field accepts a comma list. */
+    private fun parseDomains(raw: String): List<String> =
+        raw.split(',').map { it.trim().trim('.').lowercase() }
+            .filter { it.isNotEmpty() }.distinct()
+
+    private fun enteredDomains(): String =
+        parseDomains(domainInput.text.toString()).ifEmpty { listOf("x") }.joinToString(",")
+
     private fun startVpnFlow() {
         val ip = ipInput.text.toString().trim().ifEmpty { "192.168.1.159" }
-        val dom = domainInput.text.toString().trim().trim('.').lowercase().ifEmpty { "x" }
+        val dom = enteredDomains()
+        domainInput.setText(dom)
 
         getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
             .putString(KEY_DAEMON_IP, ip)
@@ -259,7 +307,7 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == VPN_REQUEST_CODE && resultCode == RESULT_OK) {
             val ip = ipInput.text.toString().trim().ifEmpty { "192.168.1.159" }
-            val dom = domainInput.text.toString().trim().trim('.').lowercase().ifEmpty { "x" }
+            val dom = enteredDomains()
 
             val startIntent = Intent(this, CallsignVpnService::class.java).apply {
                 action = CallsignVpnService.ACTION_START
@@ -284,6 +332,111 @@ class MainActivity : Activity() {
                 if (enabled) Color.parseColor("#F87171") else Color.parseColor("#38BDF8")
             )
             cornerRadius = dp(12).toFloat()
+        }
+    }
+
+    private data class FoundDaemon(val ip: String, val domain: String, val instanceId: String)
+
+    /**
+     * Auto-Discover: scans this Wi-Fi's /24 for a Callsign daemon by probing
+     * `GET /api/identity` on every host (the same endpoint the VPN service
+     * trusts for identity). A real daemon answers with a `cs-…` instance ID
+     * and its domain, so one tap fills in BOTH the IP and the domain fields.
+     */
+    private fun discoverDaemon() {
+        discoverButton.isEnabled = false
+        statusLabel.text = "◌ Scanning this Wi-Fi for Callsign…"
+        statusLabel.setTextColor(Color.parseColor("#94A3B8"))
+        scanExecutor.execute {
+            val found = scanForCallsign()
+            runOnUiThread {
+                discoverButton.isEnabled = true
+                if (found != null) {
+                    ipInput.setText(found.ip)
+                    val merged = (parseDomains(domainInput.text.toString()) + found.domain).distinct()
+                    val mergedText = merged.joinToString(",")
+                    domainInput.setText(mergedText)
+                    expectedInstanceId = found.instanceId
+                    getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                        .putString(KEY_DAEMON_IP, found.ip)
+                        .putString(KEY_DOMAIN, mergedText)
+                        .putString(KEY_INSTANCE_ID, found.instanceId)
+                        .apply()
+                    statusLabel.text = "● Found Callsign at ${found.ip} (.${found.domain})"
+                    statusLabel.setTextColor(Color.parseColor("#34D399"))
+                } else {
+                    statusLabel.text = "○ No Callsign found on this Wi-Fi — enter the IP manually"
+                    statusLabel.setTextColor(Color.parseColor("#F87171"))
+                }
+            }
+        }
+    }
+
+    private fun scanForCallsign(): FoundDaemon? {
+        val prefix = wifiSubnetPrefix() ?: return null
+        val pool = Executors.newFixedThreadPool(32)
+        return try {
+            val ecs = ExecutorCompletionService<FoundDaemon?>(pool)
+            for (host in 1..254) {
+                val ip = "$prefix$host"
+                ecs.submit(Callable { probeIdentity(ip) })
+            }
+            for (i in 1..254) {
+                val future = ecs.poll(15, TimeUnit.SECONDS) ?: break
+                val hit = try { future.get() } catch (_: Exception) { null }
+                if (hit != null) return hit
+            }
+            null
+        } catch (_: Exception) {
+            null
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    private fun probeIdentity(ip: String): FoundDaemon? {
+        return try {
+            val conn = (URL("http://$ip/api/identity").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 700
+                readTimeout = 700
+                requestMethod = "GET"
+            }
+            if (conn.responseCode != 200) return null
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val json = JSONObject(body)
+            val id = json.optString("instanceId", "")
+            val domain = json.optString("domain", "").trim().trim('.').lowercase()
+            if ((id.startsWith("cs-") || id.startsWith("ln-")) && domain.isNotEmpty()) {
+                FoundDaemon(ip, domain, id)
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** "192.168.1." for the phone's current private IPv4 — permission-free via NetworkInterface. */
+    private fun wifiSubnetPrefix(): String? {
+        return try {
+            val candidates = mutableListOf<String>()
+            for (iface in Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!iface.isUp || iface.isLoopback) continue
+                if (iface.name.startsWith("tun") || iface.name.startsWith("ppp")) continue
+                for (addr in Collections.list(iface.inetAddresses)) {
+                    if (addr !is Inet4Address || addr.isLoopbackAddress) continue
+                    val ip = addr.hostAddress ?: continue
+                    if (ip == "10.254.254.1") continue // our own VPN anchor address
+                    val isPrivate = ip.startsWith("192.168.") || ip.startsWith("10.") ||
+                        ip.matches(Regex("^172\\.(1[6-9]|2\\d|3[01])\\..*"))
+                    if (isPrivate) {
+                        candidates.add(ip.substringBeforeLast('.') + ".")
+                    }
+                }
+            }
+            candidates.firstOrNull { it.startsWith("192.168.") } ?: candidates.firstOrNull()
+        } catch (_: Exception) {
+            null
         }
     }
 

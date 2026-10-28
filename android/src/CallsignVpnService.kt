@@ -78,7 +78,12 @@ class CallsignVpnService : VpnService() {
     private var configuredDaemonIp: String = "192.168.1.159"
 
     @Volatile
-    private var configuredDomain: String = "x"
+    private var configuredDomains: List<String> = listOf("x")
+
+    /** "cofy, proj" -> ["cofy", "proj"] — the domain extra accepts a comma list. */
+    private fun parseDomains(raw: String): List<String> =
+        raw.split(',').map { it.trim().trim('.').lowercase() }
+            .filter { it.isNotEmpty() }.distinct()
 
     @Volatile
     private var expectedInstanceId: String = ""
@@ -119,7 +124,7 @@ class CallsignVpnService : VpnService() {
                     configuredDaemonIp = it.trim()
                 }
                 intent?.getStringExtra(EXTRA_DOMAIN)?.takeIf { it.isNotBlank() }?.let {
-                    configuredDomain = it.trim().trim('.').lowercase()
+                    configuredDomains = parseDomains(it).ifEmpty { listOf("x") }
                 }
                 intent?.getStringExtra(EXTRA_EXPECTED_INSTANCE_ID)?.let {
                     expectedInstanceId = it.trim()
@@ -175,7 +180,7 @@ class CallsignVpnService : VpnService() {
             val verified = verifyCallsignIdentity(
                 wifiNetwork = wifiNetwork,
                 daemonIp = configuredDaemonIp,
-                domain = configuredDomain,
+                domains = configuredDomains,
                 expectedId = expectedInstanceId
             )
 
@@ -199,20 +204,23 @@ class CallsignVpnService : VpnService() {
     private fun verifyCallsignIdentity(
         wifiNetwork: Network,
         daemonIp: String,
-        domain: String,
+        domains: List<String>,
         expectedId: String
     ): Boolean {
-        // Guard 1: UDP DNS TXT probe for `_callsign.<domain>.` on port 53
-        val txtRecords = queryDnsTxtOverWifi(wifiNetwork, daemonIp, "_callsign.$domain")
-        if (txtRecords.isNotEmpty()) {
-            val hasActiveMarker = txtRecords.any {
-                it.contains("callsign-daemon=active")
-            }
-            val matchesInstance = expectedId.isEmpty() || txtRecords.any {
-                it.contains("callsign-instance=$expectedId")
-            }
-            if (hasActiveMarker && matchesInstance) {
-                return true
+        // Guard 1: UDP DNS TXT probe for `_callsign.<domain>.` on port 53,
+        // once per configured domain — any one match verifies the daemon.
+        for (domain in domains) {
+            val txtRecords = queryDnsTxtOverWifi(wifiNetwork, daemonIp, "_callsign.$domain")
+            if (txtRecords.isNotEmpty()) {
+                val hasActiveMarker = txtRecords.any {
+                    it.contains("callsign-daemon=active")
+                }
+                val matchesInstance = expectedId.isEmpty() || txtRecords.any {
+                    it.contains("callsign-instance=$expectedId")
+                }
+                if (hasActiveMarker && matchesInstance) {
+                    return true
+                }
             }
         }
 
@@ -235,7 +243,7 @@ class CallsignVpnService : VpnService() {
             if (expectedId.isNotEmpty() && remoteId != expectedId) {
                 false
             } else {
-                remoteDomain.equals(domain, ignoreCase = true) ||
+                domains.any { remoteDomain.equals(it, ignoreCase = true) } ||
                     remoteId.startsWith("cs-") ||
                     remoteId.startsWith("ln-")
             }
@@ -310,15 +318,17 @@ class CallsignVpnService : VpnService() {
         }
 
         try {
+            val domainLabel = configuredDomains.joinToString(", .", prefix = ".")
             val builder = Builder()
-                .setSession("Callsign (.$configuredDomain & .local)")
+                .setSession("Callsign ($domainLabel & .local)")
                 .setMtu(1500)
                 // Assign a local non-conflicting /32 interface address
                 .addAddress(VIRTUAL_TUN_IPV4, 32)
                 // Point DNS at the verified Callsign daemon
                 .addDnsServer(configuredDaemonIp)
-                // Enable single-word resolution (e.g. http://plex/ -> plex.<domain>)
-                .addSearchDomain(configuredDomain)
+                // Enable single-word resolution (e.g. http://plex/ -> plex.<domain>),
+                // for every configured domain when several are comma-separated
+                .apply { for (domain in configuredDomains) addSearchDomain(domain) }
                 .addSearchDomain("local")
                 // CRITICAL: Do NOT add 0.0.0.0/0! Only route the /32 virtual anchor so internet
                 // packets never pass through the TUN file descriptor.
@@ -334,7 +344,7 @@ class CallsignVpnService : VpnService() {
 
             vpnInterface = builder.establish()
             isRunning.set(vpnInterface != null)
-            Log.i(TAG, "Established zero-config Split-DNS tunnel -> $configuredDaemonIp (.$configuredDomain)")
+            Log.i(TAG, "Established zero-config Split-DNS tunnel -> $configuredDaemonIp ($domainLabel)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed establishing Split-DNS tunnel: ${e.message}", e)
             teardownTunnel()

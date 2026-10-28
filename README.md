@@ -7,7 +7,7 @@
 
 [![Go Version](https://img.shields.io/badge/go-1.22+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20%7C%20iOS%20%7C%20Android-lightgrey)](https://github.com/cofys/callsign)
+[![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20%7C%20iOS%20%7C%20Android-lightgrey)](https://github.com/cofys/Callsign)
 [![MCP Ready](https://img.shields.io/badge/MCP-streamable%20HTTP%20%2B%20stdio-purple)](https://modelcontextprotocol.io/)
 
 ```
@@ -17,12 +17,6 @@ http://ollama.x    ──┘    (mDNS · Split-DNS · Proxy)    └──► :11
 ```
 
 </div>
-
----
-
-### 📱 Android Companion APK — [⬇️ Download callsign-companion-universal.apk](https://github.com/cofys/Callsign/raw/main/callsign-companion-universal.apk)
-
-Open that link **on your phone**, tap the downloaded file, and allow the install. Done — no PC, no dashboard visit needed. (Your phone can't open your daemon's `.local` dashboard *before* the companion is installed — that's the whole reason the APK lives here.) Once installed, the companion picks up your daemon automatically on your home Wi-Fi.
 
 ---
 
@@ -80,50 +74,52 @@ You are **not locked into preset extensions**. Callsign gives you the freedom to
 
 ## 📦 Installation & System Setup
 
-Click your platform below for quick setup instructions:
+Find your platform below:
 
-<details>
-<summary><b>🍎 macOS Installation</b></summary>
 
-### 1. Install via Homebrew or Binary
+### 🍎 macOS Installation
+
+
+#### 1. Install via Homebrew or Binary
 ```bash
 # From source / Go toolchain
 go install github.com/cofys/callsign/cmd/callsign@latest
 
 # Or build locally
-git clone https://github.com/cofys/callsign.git
-cd callsign
+git clone https://github.com/cofys/Callsign.git
+cd Callsign
 go build -o /usr/local/bin/callsign ./cmd/callsign
 ```
 
-### 2. Run as a Background Service (launchd)
+#### 2. Run with Privileged Ports
 ```bash
 # Run with privileged port 80 & 53 binding
 sudo callsign serve --domain x
 ```
 *Note: Callsign safely coexists with Apple's `mDNSResponder` on UDP port 5353 using `SO_REUSEPORT`.*
 
-### 3. iOS / iPadOS / macOS 1-Click Profile
+#### 3. iOS / iPadOS / macOS 1-Click Profile
 Open **`http://x.local`** in Safari and click **Download Apple Split-DNS Profile** (`.mobileconfig`). This instructs iOS and macOS to resolve `*.x` through your Callsign daemon without touching your router's DHCP.
-</details>
 
-<details>
-<summary><b>🐧 Linux Installation (Ubuntu, Debian, Arch, Fedora)</b></summary>
 
-### 1. Build and Install
+
+### 🐧 Linux Installation (Ubuntu, Debian, Arch, Fedora)
+
+
+#### 1. Build and Install
 ```bash
-git clone https://github.com/cofys/callsign.git
-cd callsign
+git clone https://github.com/cofys/Callsign.git
+cd Callsign
 go build -o /usr/local/bin/callsign ./cmd/callsign
 ```
 
-### 2. Allow Port 80 & 53 Without Sudo
+#### 2. Allow Port 80 & 53 Without Sudo
 Grant the binary capability to bind privileged ports as a non-root user:
 ```bash
 sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/callsign
 ```
 
-### 3. systemd Unit (`/etc/systemd/system/callsign.service`)
+#### 3. systemd Unit (`/etc/systemd/system/callsign.service`)
 ```ini
 [Unit]
 Description=Callsign Zero-Config LAN Naming Daemon
@@ -144,61 +140,73 @@ WantedBy=multi-user.target
 sudo systemctl daemon-reload
 sudo systemctl enable --now callsign
 ```
-*Note: Callsign automatically coexists with `systemd-resolved` by binding directly to your physical LAN IP rather than `127.0.0.53:53`.*
-</details>
+*Note: Callsign automatically coexists with `systemd-resolved` by binding directly to your physical LAN IP rather than `127.0.0.53:53`. The optional `/etc/hosts` sync needs write access to `/etc/hosts` — under a non-root `User=` it is skipped, and names still resolve everywhere via DNS + mDNS.*
 
-<details>
-<summary><b>🪟 Windows Installation (10 & 11)</b></summary>
 
-### 1. Build from PowerShell
+
+### 🪟 Windows Installation (10 & 11)
+
+
+#### 1. Build from PowerShell
 ```powershell
-git clone https://github.com/cofys/callsign.git
-cd callsign
+git clone https://github.com/cofys/Callsign.git
+cd Callsign
 go build -o callsign.exe ./cmd/callsign
 ```
 
-### 2. Run in Administrator Terminal
+#### 2. Run in Administrator Terminal
 ```powershell
 .\callsign.exe serve plex=32400 ha=8123 --domain x
 ```
 
-### 3. Windows Service (via WinSW or NSSM)
+#### 3. Windows Service (via WinSW or NSSM)
 ```powershell
 nssm install Callsign "$PWD\callsign.exe" "serve --domain x"
 nssm start Callsign
 ```
 *Windows 10/11 natively resolves `.local` names out of the box via mDNS.*
-</details>
 
-<details>
-<summary><b>🐳 Docker Setup</b></summary>
+
+
+### 🐳 Docker Setup
+
+No official image is published yet — build the static binary and containerize it yourself:
+
+```dockerfile
+FROM alpine:latest
+COPY callsign /usr/local/bin/callsign
+ENTRYPOINT ["callsign"]
+```
 
 Because Multicast DNS (`224.0.0.251:5353`) broadcasts on physical L2 Wi-Fi, run the container with `--net=host`:
 
 ```bash
+go build -o callsign ./cmd/callsign
+docker build -t callsign .
 docker run -d \
   --name callsign \
   --net=host \
   --restart unless-stopped \
-  -v $(pwd)/callsign.yaml:/app/callsign.yaml \
-  -v /etc/hosts:/etc/hosts \
-  cofys/callsign:latest serve plex=32400 ha=8123 --domain x
+  -v $(pwd)/callsign.yaml:/callsign.yaml \
+  callsign serve plex=32400 ha=8123 --domain x --config /callsign.yaml --no-hosts
 ```
-</details>
 
-<details>
-<summary><b>📱 Android Companion Setup</b></summary>
+## 📱 Android Companion Setup
+
+
+**[⬇️ Download the Companion APK](https://github.com/cofys/Callsign/raw/main/callsign-companion-universal.apk)** — open that link on your phone and install the file. (Your phone can't open the daemon's `.local` dashboard *before* the companion is installed — that's why the APK is here.) A running daemon also serves the same APK at `http://<daemon-ip>/setup/callsign-companion.apk` when a copy sits next to the daemon binary.
 
 Chrome on stock Android ignores mDNS in the address bar. Callsign solves this without router changes via our lightweight **Android Split-DNS Companion**:
 
-1. On your Android phone, download the prebuilt APK from GitHub: **[callsign-companion-universal.apk](https://github.com/cofys/Callsign/raw/main/callsign-companion-universal.apk)** and install it. (A running daemon also serves the same file at `http://<daemon-ip>/setup/callsign-companion.apk` if a copy sits next to the daemon binary.)
-2. The companion runs a lightweight `VpnService` that redirects **only** `*.local` and `*.x` DNS queries to Callsign.
-3. **Evil-Twin Protected:** Before activating on any Wi-Fi, the companion queries cryptographic identity records (`TXT _callsign.<domain>.`). If you are on an untrusted public Wi-Fi, the companion stays dormant.
+1. Install the APK from the download link above. Don't know the daemon's IP? Tap **Auto-Discover** in the app — it scans your Wi-Fi, finds the daemon, and fills in the IP and domain for you. Running several domains (say, one per project)? Enter them comma-separated in the domain field — e.g. `cofy,proj` — and the companion adds every one as a search domain.
+2. The companion runs a lightweight `VpnService` that redirects **only** `*.local` and your custom-domain DNS queries to Callsign.
+3. **Evil-Twin Protected:** Before activating on any Wi-Fi, the companion verifies the daemon's identity records (`TXT _callsign.<domain>`). If you are on an untrusted public Wi-Fi, the companion stays dormant.
 4. Zero traffic logging or full-tunnel routing—normal internet stays completely untouched.
-</details>
 
-<details>
-<summary><b>🤖 AI Agents & MCP Protocol (Claude Desktop, Cursor, LangChain)</b></summary>
+
+
+## 🤖 AI Agents & MCP Protocol (Claude Desktop, Cursor, LangChain)
+
 
 Callsign natively implements the **Model Context Protocol (MCP)** via both stdio and Streamable HTTP (`/mcp`):
 
@@ -226,7 +234,7 @@ AI agents can now discover and register endpoints dynamically:
 - `callsign_check_health`: Check upstream availability and latency.
 - `callsign_register_service`: Register a new local service dynamically.
 - `callsign_remove_service`: Deregister a service.
-</details>
+
 
 ---
 
@@ -264,23 +272,26 @@ Now, opening `http://plex.x` or `http://ollama.x` works seamlessly from your pho
 
 ## ❓ FAQ
 
-<details>
-<summary><b>Can I create my own extension like .a, .b, or .c?</b></summary>
 
-Yes! You are not restricted to presets. You can choose **any custom extension** you want — ultra-short single letters (`.a`, `.b`, `.c`, `.x`, `.z`), abbreviations, or words (`.hub`, `.lab`, `.home`, `.lan`). The only rule: it must **not be a real public internet extension** (like `.com` or `.dev`). Pass `--domain <suffix>` on start or change it directly in the web UI.
-</details>
+### Can I create my own extension like .a, .b, or .c?
 
-<details>
-<summary><b>What happens when a backend service is restarting?</b></summary>
+
+Yes! You are not restricted to presets. You can choose **any custom extension** you want — ultra-short single letters (`.a`, `.b`, `.c`, `.x`, `.z`), abbreviations, or words (`.hub`, `.lab`, `.home`, `.lan`). The only rule: it must **not be a real public internet extension** (like `.com` or `.dev`). Pass `--domain <suffix>` when you start the daemon.
+
+
+
+### What happens when a backend service is restarting?
+
 
 Callsign serves an embedded, zero-dependency self-healing 502 status page. It polls `/__callsign_ping` in the background and automatically refreshes your browser the millisecond your app comes back up.
-</details>
 
-<details>
-<summary><b>Will this interfere with Docker or Pi-hole?</b></summary>
+
+
+### Will this interfere with Docker or Pi-hole?
+
 
 No. If port 53 is already taken by Pi-hole or AdGuard Home on all interfaces, Callsign can run with `--no-dns` (relying on mDNS and `/etc/hosts`) or bind to a secondary IP.
-</details>
+
 
 ---
 

@@ -1,6 +1,0 @@
-{
-  "name": "Callsign — Zero-Config LAN Naming & Reverse Proxy Daemon",
-  "description": "Single-binary Go daemon combining a multi-host mDNS responder (RFC 6762), authoritative local DNS server & DoH canary blocker, HTTP/WebSocket reverse proxy, MCP agent integration, and live onboarding dashboard.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
