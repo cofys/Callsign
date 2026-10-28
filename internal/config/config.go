@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	DefaultConfigPath = "lanname.yaml"
-	DefaultDomain     = "lan"
+	DefaultConfigPath = "callsign.yaml"
+	DefaultDomain     = "x"
 	DefaultHTTPPort   = 80
 	DefaultDNSPort    = 53
 	DefaultAdminAddr  = "127.0.0.1:43199"
@@ -35,7 +35,7 @@ type Service struct {
 	HostPort  string `yaml:"-" json:"hostPort"`
 }
 
-// FileConfig is the on-disk YAML representation of lanname.yaml.
+// FileConfig is the on-disk YAML representation of callsign.yaml.
 type FileConfig struct {
 	InstanceID string            `yaml:"instance_id,omitempty" json:"instance_id,omitempty"`
 	Domain     string            `yaml:"domain" json:"domain"`
@@ -65,9 +65,9 @@ type Store struct {
 func generateInstanceID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		return "lanname-fallback-instance-id"
+		return "callsign-fallback-instance-id"
 	}
-	return "ln-" + hex.EncodeToString(b)
+	return "cs-" + hex.EncodeToString(b)
 }
 
 // NewStore creates a new thread-safe configuration store backed by path.

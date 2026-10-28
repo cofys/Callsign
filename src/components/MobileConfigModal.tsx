@@ -27,7 +27,7 @@ export const MobileConfigModal: React.FC<MobileConfigModalProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `lanname-${domain}.mobileconfig`;
+    a.download = `callsign-${domain}.mobileconfig`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -80,7 +80,7 @@ export const MobileConfigModal: React.FC<MobileConfigModalProps> = ({
 
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
           <div className="text-xs text-slate-400">
-            Android 9+ Note: Use <code className="text-slate-200">http://&lt;service&gt;.local</code> immediately or set Wi-Fi DNS 1 to <code className="text-slate-200">{lanIp}</code>.
+            Tap &ldquo;Install Profile&rdquo; in iOS Settings after downloading.
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -95,7 +95,7 @@ export const MobileConfigModal: React.FC<MobileConfigModalProps> = ({
               onClick={handleDownload}
               className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-sky-400 transition-colors whitespace-nowrap shrink-0"
             >
-              Download lanname-{domain}.mobileconfig
+              Download callsign-{domain}.mobileconfig
             </button>
           </div>
         </div>

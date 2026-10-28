@@ -64,7 +64,7 @@ export const Friendly502PreviewModal: React.FC<Friendly502PreviewModalProps> = (
           <div className="flex justify-between">
             <span className="text-slate-500">Auto-Retry Probe</span>
             <span className="text-sky-400">
-              GET /__lanname_ping?service={service.name} (every 2s)
+              GET /__callsign_ping?service={service.name} (every 2s)
             </span>
           </div>
         </div>

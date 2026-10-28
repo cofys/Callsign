@@ -1,52 +1,32 @@
 import React, { useState } from 'react';
 import {
   ServiceMapping,
+  COMMON_SERVICE_PRESETS,
+  ServicePreset,
   parseServicePair,
   createServiceMapping,
-  buildHostsBlock,
 } from './utils/lannameCore';
 import { QrCodeSvg } from './components/QrCodeSvg';
 import { Friendly502PreviewModal } from './components/Friendly502PreviewModal';
 import { MobileConfigModal } from './components/MobileConfigModal';
+import { AndroidCompanionModal } from './components/AndroidCompanionModal';
 import { ProtocolSimulatorView } from './components/ProtocolSimulatorView';
 import { SourceCodeExplorerView } from './components/SourceCodeExplorerView';
 import { DomainManagerModal } from './components/DomainManagerModal';
 import { SetupWizardView } from './components/SetupWizardView';
 
-type ActiveTab = 'dashboard' | 'wizard' | 'simulator' | 'codebase';
-
-const INITIAL_SERVICES: ServiceMapping[] = [
-  {
-    name: 'hq',
-    targetUrl: 'http://127.0.0.1:3100',
-    hostPort: '127.0.0.1:3100',
-    online: true,
-    latencyMs: 2,
-  },
-  {
-    name: 'pool',
-    targetUrl: 'http://127.0.0.1:3001',
-    hostPort: '127.0.0.1:3001',
-    online: true,
-    latencyMs: 3,
-  },
-  {
-    name: 'nas',
-    targetUrl: 'http://192.168.1.50:8080',
-    hostPort: '192.168.1.50:8080',
-    online: true,
-    latencyMs: 6,
-  },
-];
+type ActiveTab = 'apps' | 'setup' | 'developer';
+type DevSubTab = 'code' | 'simulator';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
-  const [domain, setDomain] = useState<string>('cofy');
-  const [lanIp] = useState<string>('192.168.1.24');
-  const [services, setServices] = useState<ServiceMapping[]>(INITIAL_SERVICES);
-  const [searchFilter, setSearchFilter] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('apps');
+  const [devSubTab, setDevSubTab] = useState<DevSubTab>('code');
+  const [domain, setDomain] = useState<string>('x');
+  const [lanIp] = useState<string>('192.168.1.100');
+  const [services, setServices] = useState<ServiceMapping[]>([]);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Add Service Modal state
+  // Add App Modal state
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [newSvcName, setNewSvcName] = useState('');
   const [newSvcTarget, setNewSvcTarget] = useState('');
@@ -68,8 +48,21 @@ export default function App() {
   // iOS MobileConfig Modal state
   const [mobileConfigOpen, setMobileConfigOpen] = useState(false);
 
+  // Android Companion APK Modal state
+  const [androidModalOpen, setAndroidModalOpen] = useState(false);
+
   // Custom Domain Manager Modal state
   const [domainModalOpen, setDomainModalOpen] = useState(false);
+
+  const handleCopyText = (key: string, text: string) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    setCopiedKey(key);
+    setTimeout(() => {
+      setCopiedKey((prev) => (prev === key ? null : prev));
+    }, 1800);
+  };
 
   const handleAddServiceSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,6 +80,25 @@ export default function App() {
       setAddModalOpen(false);
     } catch (err) {
       setAddError((err as Error).message);
+    }
+  };
+
+  const handleQuickAddPreset = (preset: ServicePreset) => {
+    try {
+      const mapping = createServiceMapping(
+        preset.name,
+        String(preset.defaultPort),
+        true,
+        2
+      );
+      setServices((prev) => {
+        const filtered = prev.filter((item) => item.name !== mapping.name);
+        return [...filtered, mapping].sort((a, b) =>
+          a.name.localeCompare(b.name)
+        );
+      });
+    } catch {
+      // ignore
     }
   };
 
@@ -127,105 +139,80 @@ export default function App() {
     );
   };
 
-  const filteredServices = services.filter(
-    (s) =>
-      s.name.includes(searchFilter.trim().toLowerCase()) ||
-      s.targetUrl.includes(searchFilter.trim().toLowerCase())
-  );
+  const servicePairsStr = services
+    .map((s) =>
+      s.hostPort.startsWith('127.0.0.1:')
+        ? `${s.name}=${s.hostPort.split(':')[1]}`
+        : `${s.name}=${s.hostPort}`
+    )
+    .join(' ');
 
-  const hostsBlock = buildHostsBlock(
-    lanIp,
-    domain,
-    services.map((s) => s.name)
-  );
+  const cliCommand = servicePairsStr
+    ? `callsign serve ${servicePairsStr} --domain ${domain}`
+    : `callsign serve --domain ${domain}`;
 
-  const yamlConfigPreview = [
-    `domain: ${domain}`,
-    `http_port: 80`,
-    `dns_port: 53`,
-    `upstreams:`,
-    `  - 1.1.1.1:53`,
-    `  - 8.8.8.8:53`,
-    `services:`,
-    ...services.map((s) => `  ${s.name}: ${s.targetUrl}`),
-  ].join('\n');
+  const availablePresets = COMMON_SERVICE_PRESETS.filter(
+    (p) => !services.some((s) => s.name === p.name)
+  ).slice(0, 5);
 
   return (
     <div className="min-h-screen bg-[#0b0f19] text-slate-100">
       {/* Strict 3-Zone Top Bar Contract */}
-      <header className="border-b border-slate-800 bg-[#0b0f19]">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-8 px-6 py-4">
-          {/* Zone 1: Single text element wordmark */}
+      <header className="border-b border-slate-800/80 bg-[#0b0f19]">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-6 px-6 py-4">
+          {/* Zone 1: Brand Wordmark */}
           <a
             href="#top"
             onClick={(e) => {
               e.preventDefault();
-              setActiveTab('dashboard');
+              setActiveTab('apps');
             }}
             className="text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0"
           >
-            lanname
+            Callsign
           </a>
 
-          {/* Zone 2: Concise single-line navigation links */}
+          {/* Zone 2: Minimalist 3-Item Navigation */}
           <nav
             aria-label="Primary Navigation"
-            className="flex items-center gap-6 text-sm font-medium text-slate-300"
+            className="flex items-center gap-6 text-sm font-medium text-slate-400"
           >
             <button
               type="button"
-              onClick={() => setActiveTab('wizard')}
+              onClick={() => setActiveTab('apps')}
               className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'wizard'
-                  ? 'text-sky-400 underline underline-offset-8 font-semibold'
+                activeTab === 'apps'
+                  ? 'text-white underline decoration-sky-400 decoration-2 underline-offset-8 font-semibold'
                   : ''
               }`}
             >
-              Setup Wizard (Non-Tech)
+              My Apps
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('dashboard')}
+              onClick={() => setActiveTab('setup')}
               className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'dashboard'
-                  ? 'text-sky-400 underline underline-offset-8 font-semibold'
+                activeTab === 'setup'
+                  ? 'text-white underline decoration-sky-400 decoration-2 underline-offset-8 font-semibold'
                   : ''
               }`}
             >
-              LAN Hub ({domain}.local)
+              Phone &amp; Device Setup
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('simulator')}
+              onClick={() => setActiveTab('developer')}
               className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'simulator'
-                  ? 'text-sky-400 underline underline-offset-8 font-semibold'
+                activeTab === 'developer'
+                  ? 'text-white underline decoration-sky-400 decoration-2 underline-offset-8 font-semibold'
                   : ''
               }`}
             >
-              DNS &amp; CLI Simulator
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('codebase')}
-              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${
-                activeTab === 'codebase'
-                  ? 'text-sky-400 underline underline-offset-8 font-semibold'
-                  : ''
-              }`}
-            >
-              Go Source Code (13 Files)
-            </button>
-            <button
-              type="button"
-              onClick={() => setDomainModalOpen(true)}
-              className="text-slate-400 hover:text-white transition-colors whitespace-nowrap shrink-0 font-mono text-xs"
-            >
-              .{domain} (Edit)
+              Source &amp; Tools
             </button>
           </nav>
 
-          {/* Zone 3: 1 Primary Action */}
+          {/* Zone 3: Single Primary Action */}
           <div className="shrink-0">
             <button
               type="button"
@@ -233,187 +220,154 @@ export default function App() {
                 setAddError(null);
                 setAddModalOpen(true);
               }}
-              className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-sky-400 transition-colors whitespace-nowrap shrink-0"
+              className="rounded-xl bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-sky-400 transition-colors whitespace-nowrap shrink-0"
             >
-              + Add Service
+              + Add App
             </button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-6 py-8">
-        {/* Hero Command & Telemetry Strip */}
-        <section className="mb-8 rounded-xl border border-slate-800 bg-[#111827] p-6">
-          <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
-            <div className="max-w-2xl">
-              <div className="text-xs font-medium text-slate-400">
-                Single-Binary Go Daemon · Multi-Alias mDNS (UDP 5353) · Authoritative DNS (Port 53) · Reverse Proxy (Port 80)
-              </div>
-              <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-white sm:text-3xl">
-                {domain}.local — Zero-Config Home Network Hub
-              </h1>
-              <p className="mt-2 text-sm leading-relaxed text-slate-300">
-                Every phone and laptop on Wi-Fi resolves{' '}
-                <code className="text-sky-400">http://&lt;service&gt;.local</code>{' '}
-                immediately via RFC 6762 Multicast DNS, and{' '}
-                <code className="text-sky-400">http://&lt;service&gt;.{domain}</code>{' '}
-                via local split-DNS and fenced <code className="text-slate-200">/etc/hosts</code> sync.
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-slate-800 bg-[#0b0f19] p-4 font-mono text-xs">
-              <div className="text-slate-400 mb-1">Active CLI Command:</div>
-              <div className="text-sky-300 select-all">
-                lanname serve{' '}
-                {services
-                  .map((s) =>
-                    s.hostPort.startsWith('127.0.0.1:')
-                      ? `${s.name}=${s.hostPort.split(':')[1]}`
-                      : `${s.name}=${s.hostPort}`
-                  )
-                  .join(' ')}{' '}
-                --domain {domain}
-              </div>
-              <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-400 tabular-nums">
-                <span>Primary LAN IP: {lanIp}</span>
-                <span aria-hidden="true">·</span>
-                <span>mDNS: 224.0.0.251:5353</span>
-                <span aria-hidden="true">·</span>
-                <span>DoH Canary: NXDOMAIN</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {activeTab === 'dashboard' && (
+      <main className="mx-auto max-w-5xl px-6 py-10">
+        {/* TAB 1: MINIMALIST, DUMMY-PROOF "MY APPS" HOME */}
+        {activeTab === 'apps' && (
           <div className="space-y-8">
-            {/* Toolbar: Search + Quick Actions */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <label htmlFor="service-filter" className="sr-only">
-                  Filter Services
-                </label>
-                <input
-                  id="service-filter"
-                  type="search"
-                  value={searchFilter}
-                  onChange={(e) => setSearchFilter(e.target.value)}
-                  placeholder="Filter services by name or port…"
-                  className="w-64 rounded-lg border border-slate-800 bg-[#111827] px-3.5 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-sky-400 focus:outline-none"
-                />
-                <span className="text-xs text-slate-400 font-mono tabular-nums">
-                  {filteredServices.length} of {services.length} services
-                </span>
+            {/* Simple, Calm Header */}
+            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
+                  Your Home Network Apps
+                </h1>
+                <p className="mt-1 text-sm text-slate-400">
+                  Add your local apps below to open them without typing IP addresses or port numbers.
+                </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-slate-400">
+                  Custom ending:{' '}
+                  <strong className="font-mono text-slate-200">
+                    .{domain}
+                  </strong>
+                </span>
                 <button
                   type="button"
                   onClick={() => setDomainModalOpen(true)}
-                  className="rounded-lg border border-slate-700 bg-[#111827] px-3.5 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
+                  className="rounded-lg border border-slate-800 bg-[#111827] px-3 py-1.5 font-medium text-sky-400 hover:border-slate-700 hover:text-sky-300 whitespace-nowrap shrink-0"
                 >
-                  Customize Domain (.{domain})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMobileConfigOpen(true)}
-                  className="rounded-lg border border-slate-700 bg-[#111827] px-3.5 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
-                >
-                  Download iOS/macOS Split-DNS Profile (.mobileconfig)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('codebase')}
-                  className="rounded-lg border border-slate-700 bg-[#111827] px-3.5 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
-                >
-                  Inspect Go Source Files →
+                  Change
                 </button>
               </div>
             </div>
 
-            {/* Service Cards Grid */}
-            {filteredServices.length === 0 ? (
-              <div className="rounded-xl border border-slate-800 bg-[#111827] p-8 text-center">
-                <h2 className="text-base font-semibold text-slate-200">
-                  No matching LAN services
+            {/* 1-Click Quick-Add Bar for Non-Technical Users */}
+            {availablePresets.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-800/80 bg-[#111827]/60 px-4 py-3">
+                <span className="text-xs font-medium text-slate-400 mr-1">
+                  1-Click Add:
+                </span>
+                {availablePresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleQuickAddPreset(preset)}
+                    className="rounded-lg border border-slate-800 bg-[#0b0f19] px-3 py-1 text-xs font-medium text-slate-300 hover:border-sky-500/50 hover:text-white transition-colors whitespace-nowrap shrink-0"
+                  >
+                    +{' '}
+                    {preset.displayName
+                      .replace(' Media Server', '')
+                      .replace(' Local AI', '')
+                      .replace(' Dashboard', '')}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Minimalist App Cards Grid */}
+            {services.length === 0 ? (
+              <div className="rounded-2xl border border-slate-800 bg-[#111827] p-12 text-center">
+                <h2 className="text-base font-semibold text-white">
+                  No apps configured yet
                 </h2>
-                <p className="mt-1 text-xs text-slate-400">
-                  Add a service mapping such as <code className="text-slate-200">plex=32400</code> or clear the search filter.
+                <p className="mt-1 text-sm text-slate-400">
+                  Click <strong>+ Add App</strong> or pick a preset above to create your first clean <code className="text-sky-400">.local</code> and <code className="text-sky-400">.{domain}</code> link.
                 </p>
                 <button
                   type="button"
                   onClick={() => setAddModalOpen(true)}
-                  className="mt-4 rounded-lg bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-sky-400 transition-colors whitespace-nowrap shrink-0"
+                  className="mt-5 rounded-xl bg-sky-500 px-5 py-2.5 text-xs font-semibold text-slate-950 hover:bg-sky-400 transition-colors whitespace-nowrap shrink-0"
                 >
-                  + Add Service
+                  + Add App
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
-                {filteredServices.map((svc) => {
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {services.map((svc) => {
                   const localUrl = `http://${svc.name}.local`;
                   const domainUrl = `http://${svc.name}.${domain}`;
+                  const isCopied = copiedKey === svc.name;
                   return (
                     <article
                       key={svc.name}
-                      className="flex flex-col justify-between rounded-xl border border-slate-800 bg-[#111827] p-5"
+                      className="flex flex-col justify-between rounded-2xl border border-slate-800/90 bg-[#111827] p-5 transition-colors hover:border-slate-700"
                     >
                       <div>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <h2 className="text-lg font-bold text-white truncate">
-                              {svc.name}
-                            </h2>
-                            <div className="mt-0.5 font-mono text-xs text-slate-400 tabular-nums whitespace-nowrap truncate">
-                              → {svc.targetUrl}
-                            </div>
-                          </div>
-
+                        {/* Data Point 1: App Name & Simple Status */}
+                        <div className="flex items-center justify-between gap-2">
+                          <h2 className="text-lg font-bold text-white truncate">
+                            {svc.name}
+                          </h2>
                           <button
                             type="button"
                             onClick={() => handleToggleOnline(svc.name)}
-                            title="Click to toggle simulated upstream health status"
-                            className="inline-flex items-center gap-1.5 text-xs font-semibold font-mono tabular-nums whitespace-nowrap shrink-0"
+                            title="Click to simulate online/offline status"
+                            className="inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap shrink-0"
                           >
                             <span
                               className={`h-2 w-2 rounded-full ${
-                                svc.online ? 'bg-emerald-400' : 'bg-red-500'
+                                svc.online ? 'bg-emerald-400' : 'bg-amber-400'
                               }`}
                             />
                             <span
                               className={
-                                svc.online ? 'text-emerald-400' : 'text-red-400'
+                                svc.online
+                                  ? 'text-slate-400'
+                                  : 'text-amber-300'
                               }
                             >
-                              {svc.online
-                                ? `Online · ${svc.latencyMs}ms`
-                                : 'Offline (502)'}
+                              {svc.online ? 'Ready' : 'Offline'}
                             </span>
                           </button>
                         </div>
 
-                        <div className="mt-4 space-y-2 font-mono text-xs">
-                          <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-[#0b0f19] px-3 py-2">
-                            <span className="text-sky-400 truncate">
+                        {/* Data Point 2: Clean URLs */}
+                        <div className="mt-4 rounded-xl border border-slate-800 bg-[#0b0f19] p-3.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-sm font-semibold text-sky-400 truncate">
                               {localUrl}
                             </span>
-                            <span className="text-slate-400 text-[11px] shrink-0">
-                              mDNS (UDP 5353)
-                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyText(svc.name, localUrl)}
+                              className="text-xs font-medium text-slate-400 hover:text-white whitespace-nowrap shrink-0"
+                            >
+                              {isCopied ? 'Copied!' : 'Copy'}
+                            </button>
                           </div>
-                          <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-[#0b0f19] px-3 py-2">
-                            <span className="text-sky-400 truncate">
-                              {domainUrl}
+                          <div className="mt-1.5 flex items-center justify-between gap-2 text-xs text-slate-500">
+                            <span className="font-mono truncate">
+                              or {domainUrl}
                             </span>
-                            <span className="text-slate-400 text-[11px] shrink-0">
-                              .{domain} (DNS 53)
+                            <span className="font-mono tabular-nums shrink-0">
+                              :{svc.hostPort.split(':')[1] || '80'}
                             </span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-3.5">
-                        <div className="flex items-center gap-2">
+                      {/* Data Point 3: Simple Actions */}
+                      <div className="mt-4 flex items-center justify-between pt-2 text-xs">
+                        <div className="flex items-center gap-3">
                           <button
                             type="button"
                             onClick={() => {
@@ -424,24 +378,26 @@ export default function App() {
                                 domainUrl,
                               });
                             }}
-                            className="rounded-lg border border-slate-700 bg-[#0b0f19] px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
+                            className="font-medium text-slate-300 hover:text-white whitespace-nowrap shrink-0"
                           >
-                            QR Code ({svc.name})
+                            Phone QR
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => setPreview502Svc(svc)}
-                            className="rounded-lg border border-slate-700 bg-[#0b0f19] px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
-                          >
-                            502 Page
-                          </button>
+                          {!svc.online && (
+                            <button
+                              type="button"
+                              onClick={() => setPreview502Svc(svc)}
+                              className="font-medium text-amber-400 hover:text-amber-300 whitespace-nowrap shrink-0"
+                            >
+                              View Recovery Page
+                            </button>
+                          )}
                         </div>
 
                         <button
                           type="button"
                           onClick={() => handleRemoveService(svc.name)}
                           aria-label={`Remove ${svc.name}`}
-                          className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-400 hover:bg-red-950/40 transition-colors whitespace-nowrap shrink-0"
+                          className="text-slate-500 hover:text-red-400 transition-colors whitespace-nowrap shrink-0"
                         >
                           Remove
                         </button>
@@ -452,82 +408,94 @@ export default function App() {
               </div>
             )}
 
-            {/* Live Config & /etc/hosts Synchronization Preview */}
-            <section className="grid grid-cols-1 gap-6 lg:grid-cols-2 items-stretch">
-              <div className="rounded-xl border border-slate-800 bg-[#111827] p-5 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-slate-100">
-                      Fenced /etc/hosts Synchronization (internal/hosts)
-                    </h3>
-                    <span className="font-mono text-xs text-slate-400">
-                      Auto-cleaned on SIGINT/SIGTERM
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Ensures <code className="text-slate-200">http://&lt;service&gt;.{domain}/</code> resolves immediately on the host machine even if the local OS stub resolver does not query port 53.
-                  </p>
+            {/* Quiet 1-Line Command Footer */}
+            <div className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-800/80 bg-[#111827] px-5 py-4 sm:flex-row sm:items-center">
+              <div className="min-w-0">
+                <div className="text-xs font-medium text-slate-400">
+                  Run this command on your home computer:
                 </div>
-                <pre className="mt-4 rounded-lg border border-slate-800 bg-[#0b0f19] p-3.5 font-mono text-xs text-emerald-300 overflow-x-auto">
-                  {hostsBlock}
-                </pre>
-              </div>
-
-              <div className="rounded-xl border border-slate-800 bg-[#111827] p-5 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-slate-100">
-                      Persisted State File (lanname.yaml)
-                    </h3>
-                    <span className="font-mono text-xs text-slate-400">
-                      Hot-reloaded via 127.0.0.1:43199
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Atomically updated whenever services are added via <code className="text-slate-200">lanname add</code> or the Web Hub REST API (<code className="text-slate-200">POST /api/services</code>).
-                  </p>
+                <div className="mt-1 font-mono text-xs text-sky-300 truncate select-all">
+                  {cliCommand}
                 </div>
-                <pre className="mt-4 rounded-lg border border-slate-800 bg-[#0b0f19] p-3.5 font-mono text-xs text-sky-300 overflow-x-auto">
-                  {yamlConfigPreview}
-                </pre>
               </div>
-            </section>
+              <button
+                type="button"
+                onClick={() => handleCopyText('cli', cliCommand)}
+                className="rounded-xl border border-slate-700 bg-[#0b0f19] px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 whitespace-nowrap shrink-0"
+              >
+                {copiedKey === 'cli' ? '✓ Copied' : 'Copy Command'}
+              </button>
+            </div>
           </div>
         )}
 
-        {activeTab === 'wizard' && (
+        {/* TAB 2: SIMPLE PHONE & DEVICE SETUP */}
+        {activeTab === 'setup' && (
           <SetupWizardView
             domain={domain}
             lanIp={lanIp}
-            services={services}
             onSetDomain={setDomain}
-            onAddService={(newSvc) => {
-              setServices((prev) => {
-                const filtered = prev.filter((s) => s.name !== newSvc.name);
-                return [...filtered, newSvc].sort((a, b) =>
-                  a.name.localeCompare(b.name)
-                );
-              });
-            }}
             onOpenMobileConfig={() => setMobileConfigOpen(true)}
+            onOpenAndroidModal={() => setAndroidModalOpen(true)}
           />
         )}
 
-        {activeTab === 'simulator' && (
-          <ProtocolSimulatorView
-            domain={domain}
-            lanIp={lanIp}
-            services={services}
-            onDomainChange={setDomain}
-            onAddServicePair={handleAddServicePair}
-            onRemoveService={handleRemoveService}
-          />
-        )}
+        {/* TAB 3: SOURCE CODE & SIMULATOR (TUCKED AWAY FOR DEVELOPERS) */}
+        {activeTab === 'developer' && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <h1 className="text-xl font-bold text-white">
+                  Source Code &amp; Protocol Tools
+                </h1>
+                <p className="mt-0.5 text-xs text-slate-400">
+                  Complete Go daemon source, Universal Android APK project, and live packet simulator.
+                </p>
+              </div>
 
-        {activeTab === 'codebase' && <SourceCodeExplorerView />}
+              <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-[#111827] p-1">
+                <button
+                  type="button"
+                  onClick={() => setDevSubTab('code')}
+                  className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                    devSubTab === 'code'
+                      ? 'bg-sky-500 text-slate-950'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Source Files (18)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDevSubTab('simulator')}
+                  className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                    devSubTab === 'simulator'
+                      ? 'bg-sky-500 text-slate-950'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  DNS &amp; CLI Simulator
+                </button>
+              </div>
+            </div>
+
+            {devSubTab === 'code' ? (
+              <SourceCodeExplorerView />
+            ) : (
+              <ProtocolSimulatorView
+                domain={domain}
+                lanIp={lanIp}
+                services={services}
+                onDomainChange={setDomain}
+                onAddServicePair={handleAddServicePair}
+                onRemoveService={handleRemoveService}
+              />
+            )}
+          </div>
+        )}
       </main>
 
-      {/* Add Service Modal */}
+      {/* Add App Modal */}
       {addModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
@@ -535,16 +503,15 @@ export default function App() {
           aria-modal="true"
           aria-labelledby="add-service-modal-title"
         >
-          <div className="w-full max-w-md rounded-xl border border-slate-800 bg-[#111827] p-6 shadow-2xl">
+          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-[#111827] p-6 shadow-2xl">
             <h3
               id="add-service-modal-title"
               className="text-lg font-bold text-white"
             >
-              Add LAN Service Mapping
+              Add an App
             </h3>
             <p className="mt-1 text-xs text-slate-400">
-              Announces <code className="text-slate-200">&lt;name&gt;.local</code> via UDP 5353 mDNS and resolves{' '}
-              <code className="text-slate-200">&lt;name&gt;.{domain}</code> via Port 53 DNS.
+              Give your app a short name and enter its port number.
             </p>
 
             <form onSubmit={handleAddServiceSubmit} className="mt-4 space-y-4">
@@ -553,7 +520,7 @@ export default function App() {
                   htmlFor="input-service-name"
                   className="block text-xs font-medium text-slate-300 mb-1"
                 >
-                  Service Name
+                  Short Name (e.g. plex, tv, ha)
                 </label>
                 <input
                   id="input-service-name"
@@ -562,7 +529,7 @@ export default function App() {
                   value={newSvcName}
                   onChange={(e) => setNewSvcName(e.target.value)}
                   placeholder="plex"
-                  className="w-full rounded-lg border border-slate-700 bg-[#0b0f19] px-3.5 py-2 text-sm text-white focus:border-sky-400 focus:outline-none"
+                  className="w-full rounded-xl border border-slate-700 bg-[#0b0f19] px-3.5 py-2 text-sm text-white focus:border-sky-400 focus:outline-none"
                 />
               </div>
 
@@ -571,7 +538,7 @@ export default function App() {
                   htmlFor="input-service-target"
                   className="block text-xs font-medium text-slate-300 mb-1"
                 >
-                  Target Port or Upstream Host:Port
+                  Port Number (or IP:Port)
                 </label>
                 <input
                   id="input-service-target"
@@ -579,15 +546,15 @@ export default function App() {
                   required
                   value={newSvcTarget}
                   onChange={(e) => setNewSvcTarget(e.target.value)}
-                  placeholder="32400 or 192.168.1.50:8080"
-                  className="w-full rounded-lg border border-slate-700 bg-[#0b0f19] px-3.5 py-2 text-sm text-white focus:border-sky-400 focus:outline-none"
+                  placeholder="32400"
+                  className="w-full rounded-xl border border-slate-700 bg-[#0b0f19] px-3.5 py-2 text-sm text-white focus:border-sky-400 focus:outline-none"
                 />
               </div>
 
               {addError && (
                 <div
                   role="alert"
-                  className="rounded-lg border border-red-800/60 bg-red-950/40 px-3 py-2 text-xs text-red-300"
+                  className="rounded-xl border border-red-800/60 bg-red-950/40 px-3 py-2 text-xs text-red-300"
                 >
                   {addError}
                 </div>
@@ -597,15 +564,15 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAddModalOpen(false)}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-medium text-slate-300 hover:bg-slate-700 whitespace-nowrap shrink-0"
+                  className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-medium text-slate-300 hover:bg-slate-700 whitespace-nowrap shrink-0"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-sky-400 whitespace-nowrap shrink-0"
+                  className="rounded-xl bg-sky-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-sky-400 whitespace-nowrap shrink-0"
                 >
-                  Save &amp; Announce
+                  Add App
                 </button>
               </div>
             </form>
@@ -621,31 +588,30 @@ export default function App() {
           aria-modal="true"
           aria-labelledby="qr-modal-title"
         >
-          <div className="w-full max-w-sm rounded-xl border border-slate-800 bg-[#111827] p-6 text-center shadow-2xl">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-[#111827] p-6 text-center shadow-2xl">
             <h3 id="qr-modal-title" className="text-lg font-bold text-white">
-              Scan on Wi-Fi ({qrTarget.name})
+              Open {qrTarget.name} on Your Phone
             </h3>
             <p className="mt-1 text-xs text-slate-400">
-              100% offline deterministic SVG QR code rendered by{' '}
-              <code className="text-slate-200">internal/dashboard</code>
+              Point your phone camera at this QR code while on Wi-Fi.
             </p>
 
-            <div className="mt-4 flex justify-center gap-1 rounded-lg bg-[#0b0f19] p-1 border border-slate-800">
+            <div className="mt-4 flex justify-center gap-1 rounded-xl bg-[#0b0f19] p-1 border border-slate-800">
               <button
                 type="button"
                 onClick={() => setQrMode('local')}
-                className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                className={`flex-1 rounded-lg py-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
                   qrMode === 'local'
                     ? 'bg-sky-500 text-slate-950'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                {qrTarget.name}.local (Zero-Config)
+                {qrTarget.name}.local
               </button>
               <button
                 type="button"
                 onClick={() => setQrMode('domain')}
-                className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                className={`flex-1 rounded-lg py-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
                   qrMode === 'domain'
                     ? 'bg-sky-500 text-slate-950'
                     : 'text-slate-400 hover:text-white'
@@ -671,9 +637,9 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setQrTarget(null)}
-                className="w-full rounded-lg border border-slate-700 bg-slate-800 py-2 text-xs font-medium text-slate-200 hover:bg-slate-700"
+                className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2 text-xs font-medium text-slate-200 hover:bg-slate-700"
               >
-                Close
+                Done
               </button>
             </div>
           </div>
@@ -694,6 +660,18 @@ export default function App() {
         domain={domain}
         lanIp={lanIp}
         onClose={() => setMobileConfigOpen(false)}
+      />
+
+      {/* Android Universal APK & Setup Modal */}
+      <AndroidCompanionModal
+        open={androidModalOpen}
+        domain={domain}
+        lanIp={lanIp}
+        onClose={() => setAndroidModalOpen(false)}
+        onInspectSource={() => {
+          setDevSubTab('code');
+          setActiveTab('developer');
+        }}
       />
 
       {/* Custom Domain Manager Modal */}

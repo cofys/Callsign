@@ -10,7 +10,11 @@ import dnsServerGoRaw from '../../internal/dnsserver/server.go?raw';
 import hostsGoRaw from '../../internal/hosts/hosts.go?raw';
 import proxyGoRaw from '../../internal/proxy/proxy.go?raw';
 import dashboardGoRaw from '../../internal/dashboard/dashboard.go?raw';
+import androidManifestRaw from '../../android/AndroidManifest.xml?raw';
+import androidMainActivityRaw from '../../android/MainActivity.kt?raw';
 import androidVpnKtRaw from '../../android/LannameVpnService.kt?raw';
+import androidGradleRaw from '../../android/build.gradle.kts?raw';
+import androidWorkflowRaw from '../../.github/workflows/build-android-apk.yml?raw';
 import readmeMdRaw from '../../README.md?raw';
 
 export interface GoSourceFileEntry {
@@ -90,19 +94,43 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
   {
     path: 'internal/dashboard/dashboard.go',
     packageName: 'dashboard',
-    summary: 'Live Web Hub, /api/identity & CSRF-hardened /api/services endpoints, offline QR generator, and iOS .mobileconfig builder',
+    summary: 'Live Web Hub, /api/identity, /setup/lanname-companion.apk, and iOS .mobileconfig builder',
     content: dashboardGoRaw,
   },
   {
+    path: 'android/AndroidManifest.xml',
+    packageName: 'companion-apk',
+    summary: 'Universal Android APK manifest with VpnService binding and lanname://configure QR deep-link intent filter',
+    content: androidManifestRaw,
+  },
+  {
+    path: 'android/MainActivity.kt',
+    packageName: 'companion-apk',
+    summary: 'Minimalist 1-button Android Activity with QR deep-link auto-setup and bundled assets/lanname.json loader',
+    content: androidMainActivityRaw,
+  },
+  {
     path: 'android/LannameVpnService.kt',
-    packageName: 'companion',
+    packageName: 'companion-apk',
     summary: 'Android VpnService Split-DNS shim with Evil-Twin cryptographic identity verification and Wi-Fi NetworkCallback auto-teardown',
     content: androidVpnKtRaw,
   },
   {
+    path: 'android/build.gradle.kts',
+    packageName: 'companion-apk',
+    summary: 'Gradle configuration producing a ~90KB architecture-independent Universal APK (ARM64, ARMv7, x86_64)',
+    content: androidGradleRaw,
+  },
+  {
+    path: '.github/workflows/build-android-apk.yml',
+    packageName: 'ci-cd',
+    summary: 'Automated GitHub Actions workflow to compile and sign lanname-companion-universal.apk in the cloud',
+    content: androidWorkflowRaw,
+  },
+  {
     path: 'README.md',
     packageName: 'docs',
-    summary: 'Quickstart, Linux setcap cap_net_bind_service one-liner, Docker --net=host usage, and architecture guide',
+    summary: 'Quickstart, Linux setcap cap_net_bind_service one-liner, Docker --net=host usage, and FAQ',
     content: readmeMdRaw,
   },
 ];

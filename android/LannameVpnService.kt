@@ -1,4 +1,4 @@
-package dev.lanname.companion
+package dev.callsign.companion
 
 import android.content.Context
 import android.content.Intent
@@ -38,13 +38,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 1. Cryptographic Daemon Identity Verification (Anti-Evil-Twin / Subnet Collision Guard):
  *    Before establishing the local VPN interface, this service binds a socket directly to the
  *    underlying Wi-Fi Network and verifies that `daemonIp` is genuinely running the user's
- *    `lanname` instance (`expectedInstanceId`) via UDP DNS TXT (`_lanname.<domain>.`) or
+ *    `Callsign` instance (`expectedInstanceId`) via UDP DNS TXT (`_callsign.<domain>.`) or
  *    `GET http://<daemonIp>/api/identity`. If the user connects to a coffee-shop 192.168.1.0/24
  *    network where another device occupies `192.168.1.159`, verification fails immediately and
  *    the VPN tunnel is NOT activated.
  *
  * 2. Strict Split-Tunnel Routing (Zero Internet Interception):
- *    The TUN interface ONLY routes a single /32 host route (`daemonIp/32`) or non-routable
+ *    The TUN interface ONLY routes a single /32 host route (`10.254.254.1/32`) non-routable
  *    loopback anchor, never `0.0.0.0/0`. Normal internet traffic (HTTPS, streaming, banking)
  *    never traverses the TUN file descriptor.
  *
@@ -55,10 +55,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 class LannameVpnService : VpnService() {
 
     companion object {
-        private const val TAG = "LannameVpnService"
+        private const val TAG = "CallsignVpnService"
 
-        const val ACTION_START = "dev.lanname.companion.START"
-        const val ACTION_STOP = "dev.lanname.companion.STOP"
+        const val ACTION_START = "dev.callsign.companion.START"
+        const val ACTION_STOP = "dev.callsign.companion.STOP"
 
         const val EXTRA_DAEMON_IP = "extra_daemon_ip"
         const val EXTRA_DOMAIN = "extra_domain"
@@ -78,7 +78,7 @@ class LannameVpnService : VpnService() {
     private var configuredDaemonIp: String = "192.168.1.159"
 
     @Volatile
-    private var configuredDomain: String = "cofy"
+    private var configuredDomain: String = "x"
 
     @Volatile
     private var expectedInstanceId: String = ""
@@ -88,7 +88,7 @@ class LannameVpnService : VpnService() {
 
     private val wifiNetworkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            Log.i(TAG, "Wi-Fi network available; verifying lanname daemon identity on $configuredDaemonIp")
+            Log.i(TAG, "Wi-Fi network available; verifying Callsign daemon identity on $configuredDaemonIp")
             verifyAndReconcileOnWifi(network)
         }
 
@@ -172,7 +172,7 @@ class LannameVpnService : VpnService() {
 
     private fun verifyAndReconcileOnWifi(wifiNetwork: Network) {
         workerExecutor.execute {
-            val verified = verifyLannameIdentity(
+            val verified = verifyCallsignIdentity(
                 wifiNetwork = wifiNetwork,
                 daemonIp = configuredDaemonIp,
                 domain = configuredDomain,
@@ -184,7 +184,7 @@ class LannameVpnService : VpnService() {
             } else {
                 Log.w(
                     TAG,
-                    "Host $configuredDaemonIp on current Wi-Fi did NOT match lanname identity; keeping VPN dormant."
+                    "Host $configuredDaemonIp on current Wi-Fi did NOT match Callsign identity; keeping VPN dormant."
                 )
                 teardownTunnel()
             }
@@ -192,22 +192,24 @@ class LannameVpnService : VpnService() {
     }
 
     /**
-     * Verifies that `daemonIp` on `wifiNetwork` is genuinely the user's `lanname` daemon
+     * Verifies that `daemonIp` on `wifiNetwork` is genuinely the user's `Callsign` daemon
      * before routing DNS to it. Uses `wifiNetwork.bindSocket(...)` and `protect(...)` so
      * verification bypasses any existing VPN state and probes the physical Wi-Fi LAN directly.
      */
-    private fun verifyLannameIdentity(
+    private fun verifyCallsignIdentity(
         wifiNetwork: Network,
         daemonIp: String,
         domain: String,
         expectedId: String
     ): Boolean {
-        // Guard 1: UDP DNS TXT probe for `_lanname.<domain>.` on port 53
-        val txtRecords = queryDnsTxtOverWifi(wifiNetwork, daemonIp, "_lanname.$domain")
+        // Guard 1: UDP DNS TXT probe for `_callsign.<domain>.` on port 53
+        val txtRecords = queryDnsTxtOverWifi(wifiNetwork, daemonIp, "_callsign.$domain")
         if (txtRecords.isNotEmpty()) {
-            val hasActiveMarker = txtRecords.any { it.contains("lanname-daemon=active") }
+            val hasActiveMarker = txtRecords.any {
+                it.contains("callsign-daemon=active") || it.contains("lanname-daemon=active")
+            }
             val matchesInstance = expectedId.isEmpty() || txtRecords.any {
-                it.contains("lanname-instance=$expectedId")
+                it.contains("callsign-instance=$expectedId") || it.contains("lanname-instance=$expectedId")
             }
             if (hasActiveMarker && matchesInstance) {
                 return true
@@ -233,7 +235,9 @@ class LannameVpnService : VpnService() {
             if (expectedId.isNotEmpty() && remoteId != expectedId) {
                 false
             } else {
-                remoteDomain.equals(domain, ignoreCase = true) || remoteId.startsWith("ln-")
+                remoteDomain.equals(domain, ignoreCase = true) ||
+                    remoteId.startsWith("cs-") ||
+                    remoteId.startsWith("ln-")
             }
         } catch (e: Exception) {
             false
@@ -277,8 +281,8 @@ class LannameVpnService : VpnService() {
         val baos = ByteArrayOutputStream()
         val dos = DataOutputStream(baos)
 
-        // DNS Header (12 bytes): ID=0x4C4E ("LN"), Flags=0x0100 (Standard Query, RD=1), QDCOUNT=1
-        dos.writeShort(0x4C4E)
+        // DNS Header (12 bytes): ID=0x4353 ("CS"), Flags=0x0100 (Standard Query, RD=1), QDCOUNT=1
+        dos.writeShort(0x4353)
         dos.writeShort(0x0100)
         dos.writeShort(1) // QDCOUNT
         dos.writeShort(0) // ANCOUNT
@@ -307,13 +311,13 @@ class LannameVpnService : VpnService() {
 
         try {
             val builder = Builder()
-                .setSession("lanname (.$configuredDomain & .local)")
+                .setSession("Callsign (.$configuredDomain & .local)")
                 .setMtu(1500)
                 // Assign a local non-conflicting /32 interface address
                 .addAddress(VIRTUAL_TUN_IPV4, 32)
-                // Point DNS at the verified lanname daemon
+                // Point DNS at the verified Callsign daemon
                 .addDnsServer(configuredDaemonIp)
-                // Enable single-word resolution (e.g. http://hq/ -> hq.<domain>)
+                // Enable single-word resolution (e.g. http://plex/ -> plex.<domain>)
                 .addSearchDomain(configuredDomain)
                 .addSearchDomain("local")
                 // CRITICAL: Do NOT add 0.0.0.0/0! Only route the /32 virtual anchor so internet

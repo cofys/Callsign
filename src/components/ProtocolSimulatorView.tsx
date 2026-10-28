@@ -29,12 +29,12 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
 
   // 2. Packet Inspector State
   const [protocolMode, setProtocolMode] = useState<'mdns' | 'dns'>('mdns');
-  const [queryName, setQueryName] = useState('hq.local');
+  const [queryName, setQueryName] = useState(`${domain}.local`);
   const [queryType, setQueryType] = useState<'A' | 'AAAA' | 'TXT' | 'ANY'>('AAAA');
   const [quBit, setQuBit] = useState(false);
 
   // 3. CLI Runner State
-  const [cliInput, setCliInput] = useState('lanname doctor --domain ' + domain);
+  const [cliInput, setCliInput] = useState('callsign doctor --domain ' + domain);
   const [cliOutput, setCliOutput] = useState<string>(() =>
     buildDoctorOutput(domain, lanIp)
   );
@@ -57,10 +57,16 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
     e.preventDefault();
     const raw = cliInput.trim();
     const tokens = raw.split(/\s+/);
-    const cmd = tokens[0] === 'lanname' ? tokens[1] || 'help' : tokens[0];
+    const isBinaryPrefix =
+      tokens[0] === 'callsign' || tokens[0] === 'lanname';
+    const cmd = isBinaryPrefix ? tokens[1] || 'help' : tokens[0];
 
     if (cmd === 'ls' || cmd === 'list' || cmd === 'status') {
-      const header = `lanname (running) · LAN IP: ${lanIp} · Domain: .${domain}\n\nNAME       .LOCAL URL             CUSTOM URL             UPSTREAM                 STATUS\n────       ──────────             ──────────             ────────                 ──────`;
+      const header = `Callsign (running) · LAN IP: ${lanIp} · Domain: .${domain}\n\nNAME       .LOCAL URL             CUSTOM URL             UPSTREAM                 STATUS\n────       ──────────             ──────────             ────────                 ──────`;
+      if (services.length === 0) {
+        setCliOutput(`${header}\n(no services configured — run "callsign add plex=32400")`);
+        return;
+      }
       const rows = services.map((s) => {
         const st = s.online ? `ONLINE (${s.latencyMs}ms)` : 'OFFLINE';
         return `${s.name.padEnd(10)} http://${(s.name + '.local').padEnd(15)} http://${(s.name + '.' + domain).padEnd(15)} ${s.targetUrl.padEnd(24)} ${st}`;
@@ -70,9 +76,9 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
     }
 
     if (cmd === 'add') {
-      const pair = tokens[tokens[0] === 'lanname' ? 2 : 1];
+      const pair = tokens[isBinaryPrefix ? 2 : 1];
       if (!pair) {
-        setCliOutput('Error: usage: lanname add <name=target>');
+        setCliOutput('Error: usage: callsign add <name=target>');
         return;
       }
       try {
@@ -88,13 +94,13 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
     }
 
     if (cmd === 'rm' || cmd === 'remove') {
-      const targetName = tokens[tokens[0] === 'lanname' ? 2 : 1];
+      const targetName = tokens[isBinaryPrefix ? 2 : 1];
       if (!targetName) {
-        setCliOutput('Error: usage: lanname rm <name>');
+        setCliOutput('Error: usage: callsign rm <name>');
         return;
       }
       onRemoveService(targetName);
-      setCliOutput(`✓ Removed "${targetName}" from running daemon and lanname.yaml.`);
+      setCliOutput(`✓ Removed "${targetName}" from running daemon and callsign.yaml.`);
       return;
     }
 
@@ -124,7 +130,7 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
       onDomainChange(check.domain);
       setCliOutput(
         `╭──────────────────────────────────────────────────────────────────────────╮\n` +
-          `│  lanname daemon online · LAN IP: ${lanIp.padEnd(15)} (en0)                   │\n` +
+          `│  Callsign daemon online · LAN IP: ${lanIp.padEnd(14)} (en0)                   │\n` +
           `╰──────────────────────────────────────────────────────────────────────────╯\n` +
           `  Dashboard Hub   : http://${check.domain}.local  |  http://${check.domain}\n` +
           `  mDNS Responder  : UDP 224.0.0.251:5353 (A + immediate AAAA NODATA)\n` +
@@ -135,7 +141,7 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
     }
 
     setCliOutput(
-      `lanname — Zero-Config LAN Naming & Reverse Proxy Daemon\n\nCommands:\n  lanname serve hq=3100 pool=3001 --domain ${domain}\n  lanname add <name=target>\n  lanname rm <name>\n  lanname ls\n  lanname doctor --domain ${domain}`
+      `Callsign — Zero-Config LAN Naming & Reverse Proxy Daemon\n\nCommands:\n  callsign serve plex=32400 --domain ${domain}\n  callsign add <name=target>\n  callsign rm <name>\n  callsign ls\n  callsign doctor --domain ${domain}`
     );
   };
 
@@ -160,7 +166,7 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
               type="button"
               onClick={() => {
                 setProtocolMode('mdns');
-                setQueryName('hq.local');
+                setQueryName(`${domain}.local`);
                 setQueryType('AAAA');
               }}
               className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
@@ -198,25 +204,25 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
             type="button"
             onClick={() => {
               setProtocolMode('mdns');
-              setQueryName('hq.local');
+              setQueryName(`${domain}.local`);
               setQueryType('AAAA');
               setQuBit(false);
             }}
             className="rounded-lg border border-slate-700 bg-[#0b0f19] px-3 py-1.5 text-xs font-mono text-slate-300 hover:border-sky-500/50 hover:text-sky-300 whitespace-nowrap shrink-0"
           >
-            mDNS AAAA hq.local (Dual-Stack Fix)
+            mDNS AAAA {domain}.local (Dual-Stack Fix)
           </button>
           <button
             type="button"
             onClick={() => {
               setProtocolMode('mdns');
-              setQueryName('hq.local');
+              setQueryName(`${domain}.local`);
               setQueryType('A');
               setQuBit(true);
             }}
             className="rounded-lg border border-slate-700 bg-[#0b0f19] px-3 py-1.5 text-xs font-mono text-slate-300 hover:border-sky-500/50 hover:text-sky-300 whitespace-nowrap shrink-0"
           >
-            mDNS A hq.local (QU=1 Unicast)
+            mDNS A {domain}.local (QU=1 Unicast)
           </button>
           <button
             type="button"
@@ -233,12 +239,12 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
             type="button"
             onClick={() => {
               setProtocolMode('dns');
-              setQueryName(`hq.${domain}`);
+              setQueryName(`app.${domain}`);
               setQueryType('A');
             }}
             className="rounded-lg border border-slate-700 bg-[#0b0f19] px-3 py-1.5 text-xs font-mono text-slate-300 hover:border-sky-500/50 hover:text-sky-300 whitespace-nowrap shrink-0"
           >
-            DNS A hq.{domain}
+            DNS A app.{domain}
           </button>
           <button
             type="button"
@@ -269,7 +275,7 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
                 value={queryName}
                 onChange={(e) => setQueryName(e.target.value)}
                 className="w-full rounded-lg border border-slate-700 bg-[#0b0f19] px-3.5 py-2 font-mono text-sm text-slate-100 focus:border-sky-400 focus:outline-none"
-                placeholder="hq.local"
+                placeholder={`${domain}.local`}
               />
             </div>
 
@@ -390,7 +396,7 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
             </p>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              {['cofy', 'home.arpa', 'dev', 'app', 'localhost', 'com', 'io'].map(
+              {['x', 'home.arpa', 'dev', 'app', 'localhost', 'com', 'io'].map(
                 (sample) => (
                   <button
                     key={sample}
@@ -414,7 +420,7 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
                 value={tldInput}
                 onChange={(e) => setTldInput(e.target.value)}
                 className="w-full rounded-lg border border-slate-700 bg-[#0b0f19] px-3.5 py-2 font-mono text-sm text-slate-100 focus:border-sky-400 focus:outline-none"
-                placeholder="cofy"
+                placeholder="x"
               />
               <button
                 type="button"
@@ -467,7 +473,7 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
         <section className="rounded-xl border border-slate-800 bg-[#111827] p-6 lg:col-span-7 flex flex-col justify-between">
           <div>
             <h2 className="text-xl font-bold text-slate-100">
-              03. Interactive CLI Terminal (cmd/lanname)
+              03. Interactive CLI Terminal (Callsign)
             </h2>
             <p className="mt-1 text-sm text-slate-400">
               Test <code className="text-slate-200">serve</code>,{' '}
@@ -480,35 +486,35 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setCliInput(`lanname ls`)}
+                onClick={() => setCliInput(`callsign ls`)}
                 className="rounded-md border border-slate-700 bg-[#0b0f19] px-2.5 py-1 font-mono text-xs text-slate-300 hover:text-sky-300 whitespace-nowrap shrink-0"
               >
-                lanname ls
+                callsign ls
               </button>
               <button
                 type="button"
-                onClick={() => setCliInput(`lanname doctor --domain ${domain}`)}
+                onClick={() => setCliInput(`callsign doctor --domain ${domain}`)}
                 className="rounded-md border border-slate-700 bg-[#0b0f19] px-2.5 py-1 font-mono text-xs text-slate-300 hover:text-sky-300 whitespace-nowrap shrink-0"
               >
-                lanname doctor
+                callsign doctor
               </button>
               <button
                 type="button"
-                onClick={() => setCliInput(`lanname add grafana=3000`)}
+                onClick={() => setCliInput(`callsign add grafana=3000`)}
                 className="rounded-md border border-slate-700 bg-[#0b0f19] px-2.5 py-1 font-mono text-xs text-slate-300 hover:text-sky-300 whitespace-nowrap shrink-0"
               >
-                lanname add grafana=3000
+                callsign add grafana=3000
               </button>
               <button
                 type="button"
                 onClick={() =>
                   setCliInput(
-                    `lanname serve hq=3100 pool=3001 nas=192.168.1.50:8080 --domain cofy`
+                    `callsign serve plex=32400 ha=8123 --domain x`
                   )
                 }
                 className="rounded-md border border-slate-700 bg-[#0b0f19] px-2.5 py-1 font-mono text-xs text-slate-300 hover:text-sky-300 whitespace-nowrap shrink-0"
               >
-                lanname serve ...
+                callsign serve ...
               </button>
             </div>
 
@@ -544,8 +550,8 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
 function buildDoctorOutput(domain: string, lanIp: string): string {
   const res = validateTld(domain, false);
   return [
-    'lanname network diagnostics',
-    '───────────────────────────',
+    'Callsign network diagnostics',
+    '────────────────────────────',
     `[PASS] Primary LAN IPv4 : ${lanIp} (interface en0)`,
     '[PASS] Network Mode     : Host L2 multicast reachable',
     '[PASS] mDNS Interfaces  : en0 (UDP 224.0.0.251:5353 SO_REUSEADDR | SO_REUSEPORT)',

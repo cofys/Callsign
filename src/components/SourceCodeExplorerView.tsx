@@ -43,7 +43,7 @@ export const SourceCodeExplorerView: React.FC = () => {
           </p>
         </div>
         <div className="font-mono text-xs text-slate-400">
-          go build -o lanname ./cmd/lanname
+          go build -o callsign ./cmd/lanname
         </div>
       </div>
 

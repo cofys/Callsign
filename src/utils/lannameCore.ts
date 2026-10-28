@@ -116,7 +116,7 @@ const RED_TLDS: Record<string, string> = {
   foo: 'HSTS-preloaded TLD; browsers force HTTPS on *.foo',
   day: 'HSTS-preloaded TLD; browsers force HTTPS on *.day',
   channel: 'HSTS-preloaded TLD; browsers force HTTPS on *.channel',
-  local: 'Reserved by RFC 6762 for Multicast DNS (mDNS); lanname already announces *.local automatically via UDP 5353',
+  local: 'Reserved by RFC 6762 for Multicast DNS (mDNS); Callsign already announces *.local automatically via UDP 5353',
   localhost: 'Reserved by RFC 6761 as loopback; browsers resolve *.localhost to 127.0.0.1 internally and ignore LAN DNS',
 };
 
@@ -141,7 +141,7 @@ const YELLOW_TLDS = new Set([
 
 export function normalizeDomain(domain: string): string {
   const clean = domain.trim().toLowerCase().replace(/^\.+|\.+$/g, '');
-  return clean || 'cofy';
+  return clean || 'x';
 }
 
 export function parseServicePair(
@@ -181,7 +181,7 @@ export function createServiceMapping(
     rawTarget = rawTarget.slice(1);
   }
 
-  // Case 1: Bare port number like "3100"
+  // Case 1: Bare port number like "3000"
   if (/^\d+$/.test(rawTarget)) {
     const port = Number(rawTarget);
     if (port < 1 || port > 65535) {
@@ -245,7 +245,7 @@ export function validateTld(domain: string, force = false): TldValidationResult 
       domain: clean,
       tier: 'RED',
       title: `Unsafe Domain Suffix (.${clean})`,
-      message: `${RED_TLDS[clean]}. Choose a safe private suffix like --domain cofy, --domain lan, or --domain home (or pass --force to override).`,
+      message: `${RED_TLDS[clean]}. Choose a safe private suffix like --domain x, --domain lan, or --domain home (or pass --force to override).`,
       blocked: !force,
     };
   }
@@ -255,7 +255,7 @@ export function validateTld(domain: string, force = false): TldValidationResult 
       domain: clean,
       tier: 'RED',
       title: `Unsafe Parent TLD (.${lastLabel})`,
-      message: `${RED_TLDS[lastLabel]}. Choose a safe private suffix like --domain cofy, --domain lan, or --domain home (or pass --force to override).`,
+      message: `${RED_TLDS[lastLabel]}. Choose a safe private suffix like --domain x, --domain lan, or --domain home (or pass --force to override).`,
       blocked: !force,
     };
   }
@@ -265,7 +265,7 @@ export function validateTld(domain: string, force = false): TldValidationResult 
       domain: clean,
       tier: 'YELLOW',
       title: `Public ICANN TLD Warning (.${clean})`,
-      message: `.${clean} is a delegated public internet TLD. Shadowing it on your LAN can mask real internet domains and leak internal hostnames when laptops roam off-Wi-Fi. Consider an unallocated suffix like --domain cofy or --domain home.arpa.`,
+      message: `.${clean} is a delegated public internet TLD. Shadowing it on your LAN can mask real internet domains and leak internal hostnames when laptops roam off-Wi-Fi. Consider an unallocated suffix like --domain x or --domain home.arpa.`,
       blocked: false,
     };
   }
@@ -416,10 +416,10 @@ export function simulateDnsQuery(
         cacheFlush: false,
         ttlSeconds: 60,
         answers: [
-          `${fqdn} 60 IN TXT "lanname-daemon=active" "lanname-instance=ln-9f8e7d6c5b4a3210" "lanname-domain=${cleanDomain}"`,
+          `${fqdn} 60 IN TXT "callsign-daemon=active" "callsign-instance=cs-9f8e7d6c5b4a3210" "callsign-domain=${cleanDomain}"`,
         ],
         extra: [],
-        explanation: `Cryptographic Identity TXT record for ${fqdn}. Used by the Android VpnService companion app to verify this host is the user's genuine lanname daemon before routing DNS.`,
+        explanation: `Cryptographic Identity TXT record for ${fqdn}. Used by the Android VpnService companion app to verify this host is the user's genuine Callsign daemon before routing DNS.`,
         replyDestination: 'Client Stub Resolver (UDP/TCP 53)',
       };
     }
@@ -543,25 +543,27 @@ export function verifyMutationRequestOrigin(params: {
 
 /**
  * Verifies that a target LAN IP on the current Wi-Fi network is genuinely the user's
- * lanname daemon before the Android VpnService companion activates Split-DNS.
+ * Callsign daemon before the Android VpnService companion activates Split-DNS.
  */
 export function verifyDaemonIdentityProbe(params: {
   txtRecords: string[];
   expectedInstanceId: string;
 }): { verified: boolean; reason: string } {
-  const hasActiveMarker = params.txtRecords.some((r) =>
-    r.includes('lanname-daemon=active')
+  const hasActiveMarker = params.txtRecords.some(
+    (r) => r.includes('callsign-daemon=active') || r.includes('lanname-daemon=active')
   );
   if (!hasActiveMarker) {
     return {
       verified: false,
-      reason: 'Host did not return lanname-daemon=active TXT marker (subnet collision / foreign network)',
+      reason: 'Host did not return callsign-daemon=active TXT marker (subnet collision / foreign network)',
     };
   }
   const expected = params.expectedInstanceId.trim();
   if (expected) {
-    const matchesInstance = params.txtRecords.some((r) =>
-      r.includes(`lanname-instance=${expected}`)
+    const matchesInstance = params.txtRecords.some(
+      (r) =>
+        r.includes(`callsign-instance=${expected}`) ||
+        r.includes(`lanname-instance=${expected}`)
     );
     if (!matchesInstance) {
       return {
@@ -594,9 +596,9 @@ export function buildHostsBlock(
   }
 
   return [
-    '# BEGIN LANNAME',
+    '# BEGIN CALLSIGN',
     `${lanIp} ${hostnames.join(' ')}`,
-    '# END LANNAME',
+    '# END CALLSIGN',
   ].join('\n');
 }
 
@@ -607,7 +609,7 @@ export function generateMobileConfigXml(
   const domains = Array.isArray(domainOrDomains)
     ? domainOrDomains.map(normalizeDomain)
     : [normalizeDomain(domainOrDomains)];
-  const primaryDomain = domains[0] || 'home';
+  const primaryDomain = domains[0] || 'x';
   const matchDomainsXml = [...domains, 'local']
     .map((d) => `\t\t\t\t\t<string>${d}</string>`)
     .join('\n');
@@ -635,9 +637,9 @@ ${matchDomainsXml}
 			<key>PayloadDescription</key>
 			<string>Routes *.${primaryDomain} local LAN domains to ${lanIp}</string>
 			<key>PayloadDisplayName</key>
-			<string>lanname (.${primaryDomain} Split-DNS)</string>
+			<string>Callsign (.${primaryDomain} Split-DNS)</string>
 			<key>PayloadIdentifier</key>
-			<string>io.lanname.dns.${primaryDomain}.settings</string>
+			<string>io.callsign.dns.${primaryDomain}.settings</string>
 			<key>PayloadType</key>
 			<string>com.apple.dnsSettings.managed</string>
 			<key>PayloadUUID</key>
@@ -647,13 +649,13 @@ ${matchDomainsXml}
 		</dict>
 	</array>
 	<key>PayloadDescription</key>
-	<string>Zero-config split-DNS profile generated by lanname so your iPhone, iPad, or Mac resolves *.${primaryDomain} directly via ${lanIp} without changing router DHCP.</string>
+	<string>Zero-config split-DNS profile generated by Callsign so your iPhone, iPad, or Mac resolves *.${primaryDomain} directly via ${lanIp} without changing router DHCP.</string>
 	<key>PayloadDisplayName</key>
-	<string>lanname — .${primaryDomain} Local Domain</string>
+	<string>Callsign — .${primaryDomain} Local Domain</string>
 	<key>PayloadIdentifier</key>
-	<string>io.lanname.profile.${primaryDomain}</string>
+	<string>io.callsign.profile.${primaryDomain}</string>
 	<key>PayloadOrganization</key>
-	<string>lanname Homelab</string>
+	<string>Callsign</string>
 	<key>PayloadRemovalDisallowed</key>
 	<false/>
 	<key>PayloadType</key>

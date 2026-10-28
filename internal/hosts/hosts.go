@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	beginMarker = "# BEGIN LANNAME"
-	endMarker   = "# END LANNAME"
+	beginMarker = "# BEGIN CALLSIGN"
+	endMarker   = "# END CALLSIGN"
 )
 
 // Manager safely synchronizes a fenced block in the OS hosts file (/etc/hosts)

@@ -9,12 +9,12 @@ interface DomainManagerModalProps {
 }
 
 const PRESET_DOMAINS = [
+  { domain: 'x', label: '.x', desc: 'Ultra-short 1-letter custom suffix' },
   { domain: 'home', label: '.home', desc: 'Standard private home network suffix' },
   { domain: 'lan', label: '.lan', desc: 'Universal Local Area Network suffix' },
   { domain: 'lab', label: '.lab', desc: 'Homelab & self-hosting server domain' },
   { domain: 'box', label: '.box', desc: 'Short, clean personal box suffix' },
   { domain: 'home.arpa', label: '.home.arpa', desc: 'Official IETF RFC 8375 non-delegated home domain' },
-  { domain: 'cofy', label: '.cofy', desc: 'Custom personal brand / nickname suffix' },
 ];
 
 export const DomainManagerModal: React.FC<DomainManagerModalProps> = ({

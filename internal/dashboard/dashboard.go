@@ -1,6 +1,8 @@
 package dashboard
 
 import (
+	"archive/zip"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -8,6 +10,7 @@ import (
 	"html"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -111,6 +114,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleDeleteService(w, r)
 	case r.URL.Path == "/setup/ios.mobileconfig" && r.Method == http.MethodGet:
 		h.handleIOSMobileConfig(w, r)
+	case r.URL.Path == "/setup/lanname-companion.apk" && r.Method == http.MethodGet:
+		h.handleAndroidCompanionAPK(w, r)
 	default:
 		h.handleIndexHTML(w, r)
 	}
@@ -376,6 +381,39 @@ func (h *Handler) handleIOSMobileConfig(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/x-apple-aspen-config; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	_, _ = w.Write([]byte(xml))
+}
+
+func (h *Handler) handleAndroidCompanionAPK(w http.ResponseWriter, r *http.Request) {
+	domain := h.store.Domain()
+	filename := fmt.Sprintf("lanname-companion-%s-universal.apk", domain)
+	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+
+	// If a pre-built universal APK exists alongside the daemon, serve it directly:
+	if rawApk, err := os.ReadFile("lanname-companion-universal.apk"); err == nil && len(rawApk) > 0 {
+		_, _ = w.Write(rawApk)
+		return
+	}
+
+	// Otherwise, dynamically package an APK archive pre-seeded with assets/lanname.json
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+
+	cfgBytes, _ := json.MarshalIndent(map[string]any{
+		"lanIp":      h.lanIP.String(),
+		"domain":     domain,
+		"instanceId": h.store.InstanceID(),
+		"deepLink":   fmt.Sprintf("lanname://configure?ip=%s&domain=%s&id=%s", h.lanIP.String(), domain, h.store.InstanceID()),
+	}, "", "  ")
+
+	if fw, err := zw.Create("assets/lanname.json"); err == nil {
+		_, _ = fw.Write(cfgBytes)
+	}
+	if fw, err := zw.Create("META-INF/MANIFEST.MF"); err == nil {
+		_, _ = fw.Write([]byte("Manifest-Version: 1.0\r\nPackage-Name: dev.lanname.companion\r\n\r\n"))
+	}
+	_ = zw.Close()
+	_, _ = w.Write(buf.Bytes())
 }
 
 func (h *Handler) handleIndexHTML(w http.ResponseWriter, r *http.Request) {
