@@ -12,8 +12,8 @@ import proxyGoRaw from '../../internal/proxy/proxy.go?raw';
 import mcpServerGoRaw from '../../internal/mcp/server.go?raw';
 import dashboardGoRaw from '../../internal/dashboard/dashboard.go?raw';
 import androidManifestRaw from '../../android/AndroidManifest.xml?raw';
-import androidMainActivityRaw from '../../android/MainActivity.kt?raw';
-import androidVpnKtRaw from '../../android/CallsignVpnService.kt?raw';
+import androidMainActivityRaw from '../../android/src/MainActivity.kt?raw';
+import androidVpnKtRaw from '../../android/src/CallsignVpnService.kt?raw';
 import androidGradleRaw from '../../android/build.gradle.kts?raw';
 import androidWorkflowRaw from '../../.github/workflows/build-android-apk.yml?raw';
 import readmeMdRaw from '../../README.md?raw';
@@ -111,13 +111,13 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
     content: androidManifestRaw,
   },
   {
-    path: 'android/MainActivity.kt',
+    path: 'android/src/MainActivity.kt',
     packageName: 'companion-apk',
     summary: 'Minimalist 1-button Android Activity with QR deep-link auto-setup and bundled assets/callsign.json loader',
     content: androidMainActivityRaw,
   },
   {
-    path: 'android/CallsignVpnService.kt',
+    path: 'android/src/CallsignVpnService.kt',
     packageName: 'companion-apk',
     summary: 'Android VpnService Split-DNS shim with Evil-Twin cryptographic identity verification and Wi-Fi NetworkCallback auto-teardown',
     content: androidVpnKtRaw,

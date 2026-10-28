@@ -3,6 +3,13 @@ plugins {
     kotlin("android") version "1.9.24"
 }
 
+// Kotlin sources live in src/ (see sourceSets below). They cannot sit in the
+// project root next to the .kts build scripts: a root-level source dir makes
+// the Kotlin compiler try to compile build.gradle.kts / settings.gradle.kts
+// as scripts (internal error: NoDescriptorForDeclarationException SCRIPT),
+// and makes compile tasks treat Gradle's own build/ outputs as inputs
+// (implicit-dependency task-validation failures).
+
 android {
     namespace = "dev.callsign.companion"
     compileSdk = 34
@@ -29,7 +36,7 @@ android {
     sourceSets {
         getByName("main") {
             manifest.srcFile("AndroidManifest.xml")
-            java.srcDirs(".")
+            java.srcDirs("src")
             assets.srcDirs("assets")
         }
     }

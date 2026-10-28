@@ -20,6 +20,12 @@ http://ollama.x    ──┘    (mDNS · Split-DNS · Proxy)    └──► :11
 
 ---
 
+### 📱 Android Companion APK — [⬇️ Download callsign-companion-universal.apk](https://github.com/cofys/Callsign/raw/main/callsign-companion-universal.apk)
+
+Open that link **on your phone**, tap the downloaded file, and allow the install. Done — no PC, no dashboard visit needed. (Your phone can't open your daemon's `.local` dashboard *before* the companion is installed — that's the whole reason the APK lives here.) Once installed, the companion picks up your daemon automatically on your home Wi-Fi.
+
+---
+
 ## ⚡ The Problem & The Fix
 
 Every home app or dev server runs on an annoying IP and port (`http://192.168.1.50:32400`, `http://localhost:8123`, `http://localhost:11434`). Remembering ports across laptops, tablets, phones, and AI tools is painful.
@@ -185,7 +191,7 @@ docker run -d \
 
 Chrome on stock Android ignores mDNS in the address bar. Callsign solves this without router changes via our lightweight **Android Split-DNS Companion**:
 
-1. Open **`http://x.local`** (or your host's IP) on your Android phone and download `callsign-companion.apk`.
+1. On your Android phone, download the prebuilt APK from GitHub: **[callsign-companion-universal.apk](https://github.com/cofys/Callsign/raw/main/callsign-companion-universal.apk)** and install it. (A running daemon also serves the same file at `http://<daemon-ip>/setup/callsign-companion.apk` if a copy sits next to the daemon binary.)
 2. The companion runs a lightweight `VpnService` that redirects **only** `*.local` and `*.x` DNS queries to Callsign.
 3. **Evil-Twin Protected:** Before activating on any Wi-Fi, the companion queries cryptographic identity records (`TXT _callsign.<domain>.`). If you are on an untrusted public Wi-Fi, the companion stays dormant.
 4. Zero traffic logging or full-tunnel routing—normal internet stays completely untouched.

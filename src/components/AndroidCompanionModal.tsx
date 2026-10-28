@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { QrCodeSvg } from './QrCodeSvg';
 import { buildUniversalApkBundleBytes } from '../utils/apkBundleGenerator';
 import androidManifestRaw from '../../android/AndroidManifest.xml?raw';
-import mainActivityKtRaw from '../../android/MainActivity.kt?raw';
-import callsignVpnKtRaw from '../../android/CallsignVpnService.kt?raw';
+import mainActivityKtRaw from '../../android/src/MainActivity.kt?raw';
+import callsignVpnKtRaw from '../../android/src/CallsignVpnService.kt?raw';
 import buildGradleKtRaw from '../../android/build.gradle.kts?raw';
 
 interface AndroidCompanionModalProps {
