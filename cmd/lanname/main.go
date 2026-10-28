@@ -21,6 +21,7 @@ import (
 	"github.com/lanname/lanname/internal/dashboard"
 	"github.com/lanname/lanname/internal/dnsserver"
 	"github.com/lanname/lanname/internal/hosts"
+	"github.com/lanname/lanname/internal/mcp"
 	"github.com/lanname/lanname/internal/mdns"
 	"github.com/lanname/lanname/internal/netutil"
 	"github.com/lanname/lanname/internal/proxy"
@@ -48,11 +49,13 @@ func main() {
 		err = runList(args)
 	case "doctor":
 		err = runDoctor(args)
+	case "mcp":
+		err = runMCP(args)
 	case "-h", "--help", "help":
 		printUsage()
 		return
 	default:
-		// Convenience: if first arg contains '=', treat as `lanname serve ...`
+		// Convenience: if first arg contains '=', treat as `callsign serve ...`
 		if strings.Contains(subcmd, "=") {
 			err = runServe(os.Args[1:])
 		} else {
@@ -69,20 +72,21 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`lanname — Zero-Config LAN Naming & Reverse Proxy Daemon
+	fmt.Println(`Callsign — Zero-Config LAN & Tailscale Naming + AI Agent MCP Daemon
 
 Usage:
-  lanname serve [name=target...] [--domain cofy] [--http-port 80] [--dns-port 53] [--config lanname.yaml] [--no-dns] [--no-hosts]
-  lanname add <name=target> [--config lanname.yaml]
-  lanname rm <name> [--config lanname.yaml]
-  lanname ls [--config lanname.yaml]
-  lanname doctor [--domain cofy]
+  callsign serve [name=target...] [--domain x] [--http-port 80] [--dns-port 53] [--config callsign.yaml] [--no-dns] [--no-hosts]
+  callsign add <name=target> [--config callsign.yaml]
+  callsign rm <name> [--config callsign.yaml]
+  callsign ls [--config callsign.yaml] [--json]
+  callsign mcp [--config callsign.yaml] [--allow-agent-mutations] [--agent-token <token>]
+  callsign doctor [--domain x]
 
 Examples:
-  sudo lanname serve hq=3100 pool=3001 nas=192.168.1.50:8080 --domain cofy
-  lanname add plex=32400
-  lanname ls
-  lanname doctor --domain cofy`)
+  callsign serve plex=32400 ha=8123 ollama=11434 --domain x
+  callsign add jellyfin=8096
+  callsign mcp --allow-agent-mutations
+  callsign doctor --domain x`)
 }
 
 // runServe implements `lanname serve [name=target...] [flags]`.
@@ -527,9 +531,41 @@ func runDoctor(args []string) error {
 		fmt.Printf("[PASS] UDP Port 53      : Available on %s\n", bindDNSAddr)
 	}
 
-	// 5. TLD Safety Check
+	// 5. Tailscale CGNAT Overlay Check
+	if tsIP, tsIface := netutil.TailscaleIPv4(); tsIP != nil {
+		fmt.Printf("[PASS] Tailscale Mesh   : %s (interface %s — Split-Horizon DNS ready)\n", tsIP.String(), tsIface)
+	} else {
+		fmt.Println("[INFO] Tailscale Mesh   : Not detected (optional — install Tailscale for global *.x access)")
+	}
+
+	// 6. TLD Safety Check
 	res := tld.Validate(*domain, false)
 	fmt.Printf("[%s] Domain .%-8s : %s — %s\n", res.Tier, res.Domain, res.Title, res.Message)
 
 	return nil
+}
+
+// runMCP implements `callsign mcp` (Model Context Protocol JSON-RPC 2.0 server over stdio).
+func runMCP(args []string) error {
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	configPath := fs.String("config", config.DefaultConfigPath, "Path to callsign.yaml")
+	allowMutations := fs.Bool("allow-agent-mutations", false, "Allow AI agents to register or remove services")
+	agentToken := fs.String("agent-token", "", "Optional Bearer token required for mutating agent tool calls")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	store := config.NewStore(*configPath)
+	if err := store.Load(); err != nil {
+		return err
+	}
+
+	lanIP, _, err := netutil.PrimaryLANIPv4()
+	if err != nil || lanIP == nil {
+		lanIP = net.ParseIP("127.0.0.1")
+	}
+	tsIP, _ := netutil.TailscaleIPv4()
+
+	srv := mcp.NewServer(store, lanIP, tsIP, *allowMutations, *agentToken)
+	return srv.ServeStdio(os.Stdin, os.Stdout)
 }

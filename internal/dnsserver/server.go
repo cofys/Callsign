@@ -12,6 +12,7 @@ import (
 	"github.com/miekg/dns"
 
 	"github.com/lanname/lanname/internal/config"
+	"github.com/lanname/lanname/internal/netutil"
 )
 
 const (
@@ -19,12 +20,13 @@ const (
 	forwardTimeout = 2 * time.Second
 )
 
-// Server is an authoritative local DNS server for *.<domain> and <domain>,
+// Server is an authoritative local & Tailscale Split-Horizon DNS server for *.<domain> and <domain>,
 // a Browser DoH Canary blocker (use-application-dns.net -> NXDOMAIN),
 // and a fast upstream DNS forwarder.
 type Server struct {
 	store       *config.Store
 	lanIP       net.IP
+	tailscaleIP net.IP
 	boundAddrs  []string
 	mu          sync.Mutex
 	dnsServers  []*dns.Server
@@ -32,11 +34,13 @@ type Server struct {
 	dnsClientTC *dns.Client
 }
 
-// New creates a new DNS Server backed by the configuration store and primary LAN IPv4.
+// New creates a new DNS Server backed by the configuration store, primary LAN IPv4, and optional Tailscale IPv4.
 func New(store *config.Store, lanIP net.IP) *Server {
+	tsIP, _ := netutil.TailscaleIPv4()
 	return &Server{
-		store: store,
-		lanIP: lanIP.To4(),
+		store:       store,
+		lanIP:       lanIP.To4(),
+		tailscaleIP: tsIP,
 		dnsClient: &dns.Client{
 			Net:     "udp",
 			Timeout: forwardTimeout,
@@ -48,8 +52,8 @@ func New(store *config.Store, lanIP net.IP) *Server {
 	}
 }
 
-// Start binds UDP and TCP listeners on <LAN_IP>:<dnsPort>, 127.0.0.1:<dnsPort>,
-// and dual-stack IPv6 [::1]:<dnsPort> (gracefully continuing if an address is already in use).
+// Start binds UDP and TCP listeners on <LAN_IP>:<dnsPort>, <TAILSCALE_IP>:<dnsPort> (if active),
+// 127.0.0.1:<dnsPort>, and dual-stack IPv6 [::1]:<dnsPort>.
 func (s *Server) Start(ctx context.Context) ([]string, error) {
 	port := s.store.DNSPort()
 	type listenTarget struct {
@@ -59,6 +63,13 @@ func (s *Server) Start(ctx context.Context) ([]string, error) {
 	}
 	candidates := []listenTarget{
 		{udpNet: "udp4", tcpNet: "tcp4", addr: fmt.Sprintf("%s:%d", s.lanIP.String(), port)},
+	}
+	if s.tailscaleIP != nil && !s.tailscaleIP.Equal(s.lanIP) {
+		candidates = append(candidates, listenTarget{
+			udpNet: "udp4",
+			tcpNet: "tcp4",
+			addr:   fmt.Sprintf("%s:%d", s.tailscaleIP.String(), port),
+		})
 	}
 	if s.lanIP.String() != "127.0.0.1" {
 		candidates = append(candidates, listenTarget{udpNet: "udp4", tcpNet: "tcp4", addr: fmt.Sprintf("127.0.0.1:%d", port)})
@@ -133,22 +144,36 @@ func (s *Server) BoundAddrs() []string {
 	return append([]string{}, s.boundAddrs...)
 }
 
-// isPrivateOrLocalClient enforces a strict Private LAN ACL so that even if a router
-// accidentally exposes port 53 via UPnP or DMZ, the daemon refuses public internet queries
-// and cannot be abused as an open DNS amplification resolver.
+// isPrivateOrLocalClient enforces a strict Private LAN + Tailscale CGNAT ACL so that even if
+// a router accidentally exposes port 53 via UPnP or DMZ, the daemon refuses public internet queries.
 func isPrivateOrLocalClient(addr net.Addr) bool {
-	if addr == nil {
+	ip := extractRemoteIP(addr)
+	if ip == nil {
 		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || netutil.IsTailscaleIP(ip)
+}
+
+func extractRemoteIP(addr net.Addr) net.IP {
+	if addr == nil {
+		return nil
 	}
 	host, _, err := net.SplitHostPort(addr.String())
 	if err != nil {
 		host = addr.String()
 	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
+	return net.ParseIP(host)
+}
+
+// answerIPForClient implements Split-Horizon DNS:
+// - Queries arriving from a Tailscale peer (100.64.0.0/10 or fd7a:115c:a1e0::/48) receive the host's Tailscale IPv4.
+// - Queries arriving from the local LAN receive the host's direct LAN IPv4.
+func (s *Server) answerIPForClient(addr net.Addr) net.IP {
+	remoteIP := extractRemoteIP(addr)
+	if s.tailscaleIP != nil && netutil.IsTailscaleIP(remoteIP) {
+		return s.tailscaleIP
 	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+	return s.lanIP
 }
 
 func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
@@ -156,7 +181,7 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 
-	// Security Hardening: Reject queries originating outside RFC1918 / IPv6 ULA / Loopback / Link-Local
+	// Security Hardening: Reject queries originating outside RFC1918 / Tailscale CGNAT / IPv6 ULA / Loopback
 	if !isPrivateOrLocalClient(w.RemoteAddr()) {
 		refused := new(dns.Msg)
 		refused.SetRcode(r, dns.RcodeRefused)
@@ -168,8 +193,6 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 	qName := strings.ToLower(q.Name)
 
 	// 1. Browser DoH Canary Protection:
-	// Return NXDOMAIN for Mozilla Firefox's canary ("use-application-dns.net.")
-	// and DDR discovery ("_dns.resolver.arpa.") so browsers do not bypass local LAN DNS.
 	if qName == "use-application-dns.net." ||
 		strings.HasSuffix(qName, ".use-application-dns.net.") ||
 		qName == "_dns.resolver.arpa." ||
@@ -208,12 +231,10 @@ func (s *Server) handleAuthoritativeLocal(
 	m.Authoritative = true
 	m.RecursionAvailable = true
 
-	// Cryptographic Instance Identity Probe: _lanname.<domain>. or _lanname.local.
-	// Used by the Android VpnService companion app to verify this host is the user's
-	// genuine lanname daemon and not a rogue/colliding 192.168.1.x IP on public Wi-Fi.
-	isIdentityProbe := qName == "_lanname."+domainFQDN || qName == "_lanname.local."
+	// Cryptographic Instance Identity Probe: _callsign.<domain>. or _callsign.local.
+	isIdentityProbe := qName == "_callsign."+domainFQDN || qName == "_callsign.local." ||
+		qName == "_lanname."+domainFQDN || qName == "_lanname.local."
 
-	// Determine whether the queried name matches the base hub (<domain>.) or a known service (<svc>.<domain>.)
 	isKnown := isIdentityProbe
 	if !isKnown {
 		if qName == domainFQDN || qName == domain+".local." {
@@ -234,8 +255,6 @@ func (s *Server) handleAuthoritativeLocal(
 	}
 
 	if !isKnown {
-		// Wildcard fallback: also resolve unknown subdomains of *.<domain>. to LAN_IP
-		// so the HTTP reverse proxy can display a helpful 404/dashboard page instead of DNS failure.
 		isKnown = strings.HasSuffix(qName, domainSuffix)
 	}
 
@@ -254,10 +273,9 @@ func (s *Server) handleAuthoritativeLocal(
 				Class:  dns.ClassINET,
 				Ttl:    localRecordTTL,
 			},
-			A: s.lanIP,
+			A: s.answerIPForClient(w.RemoteAddr()),
 		})
 	case dns.TypeAAAA:
-		// Return immediate NOERROR with 0 Answer records (NODATA) so dual-stack clients don't stall
 		m.Rcode = dns.RcodeSuccess
 	case dns.TypeTXT:
 		m.Answer = append(m.Answer, &dns.TXT{
@@ -268,9 +286,9 @@ func (s *Server) handleAuthoritativeLocal(
 				Ttl:    localRecordTTL,
 			},
 			Txt: []string{
-				"lanname-daemon=active",
-				"lanname-instance=" + s.store.InstanceID(),
-				"lanname-domain=" + domain,
+				"callsign-daemon=active",
+				"callsign-instance=" + s.store.InstanceID(),
+				"callsign-domain=" + domain,
 			},
 		})
 	default:

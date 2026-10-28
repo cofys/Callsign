@@ -123,6 +123,41 @@ docker run -d \
 
 ---
 
+## Anywhere Access with Tailscale (Split-Horizon DNS)
+
+`Callsign` automatically detects your **Tailscale CGNAT IP** (`100.64.0.0/10`) and **IPv6 ULA** (`fd7a:115c:a1e0::/48`) interface and runs a **Source-IP Split-Horizon DNS Server**:
+
+- **On Home Wi-Fi (`192.168.x.x`):** Queries for `plex.x` or `ollama.x` return your direct LAN IP (`192.168.1.100`) for full Gigabit LAN speed.
+- **On Tailscale (`100.64.0.0/10` — 5G, coffee shop, remote VPS):** Queries for `plex.x` or `ollama.x` automatically return your host's Tailscale IP (`100.85.12.34`).
+- **Works for Non-Tailscale LAN Appliances:** Even if your NAS (`192.168.1.50:8080`) or IoT devices cannot run Tailscale, `Callsign` reverse-proxies `http://nas.x` from your Tailscale interface onto your home LAN with **zero Subnet Router configuration**.
+
+### 30-Second Tailscale Setup:
+1. Open your [Tailscale Admin DNS Console](https://login.tailscale.com/admin/dns).
+2. Click **Add Nameserver -> Custom**, enter your Callsign host's Tailscale IP (e.g. `100.85.12.34`), and enable **Restrict to domain**: `x`.
+3. Every device and cloud AI agent on your tailnet can now open `http://plex.x`, `http://ha.x`, and `http://ollama.x` from anywhere in the world.
+
+---
+
+## Built-In AI Agent & MCP Server (`callsign mcp`)
+
+AI agents (Claude Desktop, Cursor, Windsurf, Cline, LangChain, OpenAI/Gemini tool-calling bots) can discover and resolve your local services without hardcoding ports:
+
+```json
+{
+  "mcpServers": {
+    "callsign": {
+      "command": "callsign",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+- **Zero-Trust by Default:** Read-only discovery tools (`callsign_list_services`, `callsign_resolve`, `callsign_check_health`) are enabled by default for verified LAN/Tailscale peers.
+- **Scoped Bearer Token for Mutations:** Registering new routes (`callsign_register_service`) requires explicit opt-in (`--allow-agent-mutations`) and an optional `Authorization: Bearer cs_tok_...` token.
+
+---
+
 ## Frequently Asked Questions (FAQ)
 
 ### 1. Can I use my own custom domain suffix and service prefixes?
@@ -147,13 +182,13 @@ Many coffee shops and hotels use `192.168.1.0/24`. If a naive VPN app blindly se
 
 ### 5. Is the `Callsign` daemon itself secure on my network?
 Yes. Three built-in protections are always active:
-1. **Private LAN ACL on Port 53:** The DNS server verifies the source IP of every packet (`isPrivateOrLocalClient`) and only answers Loopback (`127.0.0.1`), Private LAN (`10.x`, `172.16-31.x`, `192.168.x`), Link-Local, and IPv6 ULA (`fc00::/7`) addresses. Even if a router accidentally exposed port 53 via UPnP, public internet queries receive `REFUSED`.
+1. **Private LAN + Tailscale CGNAT ACL on Port 53:** The DNS server verifies the source IP of every packet (`isPrivateOrLocalClient`) and only answers Loopback (`127.0.0.1`), Private LAN (`10.x`, `172.16-31.x`, `192.168.x`), Tailscale CGNAT (`100.64.0.0/10`), Link-Local, and IPv6 ULA (`fc00::/7`) addresses. Even if a router accidentally exposed port 53 via UPnP, public internet queries receive `REFUSED`.
 2. **CSRF & DNS-Rebinding Protection:** Mutating API endpoints (`POST /api/services` and `DELETE /api/services/*`) verify `Sec-Fetch-Site: same-origin`, `Origin`, and an explicit `Host` header allowlist so a malicious external website opened in your browser cannot add or alter routes on your LAN.
 3. **Loopback-Only CLI Admin Socket:** CLI hot-reload commands (`callsign add` / `callsign rm`) communicate over `127.0.0.1:43199`, which is unreachable from other machines.
 
 ### 6. Will `Callsign` conflict with `systemd-resolved` (Ubuntu/Debian), `avahi-daemon`, or macOS?
 No.
-- **Port 53 (Unicast DNS):** On Linux systems running `systemd-resolved` (which binds `127.0.0.53:53`), `Callsign` binds directly to your primary LAN IP (e.g., `192.168.1.159:53`) instead of `0.0.0.0:53`, avoiding port conflicts entirely.
+- **Port 53 (Unicast DNS):** On Linux systems running `systemd-resolved` (which binds `127.0.0.53:53`), `Callsign` binds directly to your primary LAN IP (e.g., `192.168.1.159:53`) and Tailscale IP (`100.85.12.34:53`) instead of `0.0.0.0:53`, avoiding port conflicts entirely.
 - **Port 5353 (mDNS):** `Callsign` sets `SO_REUSEADDR` and `SO_REUSEPORT` on its multicast socket so it runs side-by-side with `avahi-daemon` or macOS `mDNSResponder`.
 
 ### 7. What happens if I stop `Callsign` or restart my computer?

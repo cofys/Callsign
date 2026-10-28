@@ -146,6 +146,88 @@ test('security guards: Private LAN ACL, CSRF/DNS-rebinding check, and Android Ev
   assert.equal(evilTwin.verified, false);
 });
 
+import {
+  isTailscaleIp,
+  resolveSplitHorizonIp,
+  authorizeAgentMcpCall,
+} from './lannameCore';
+
+test('Tailscale CGNAT (100.64.0.0/10) and Split-Horizon DNS answer based on source IP', () => {
+  assert.equal(isTailscaleIp('100.64.0.1'), true);
+  assert.equal(isTailscaleIp('100.85.12.34'), true);
+  assert.equal(isTailscaleIp('100.127.255.254'), true);
+  assert.equal(isTailscaleIp('100.63.255.255'), false);
+  assert.equal(isTailscaleIp('100.128.0.1'), false);
+  assert.equal(isTailscaleIp('fd7a:115c:a1e0::1a2b'), true);
+
+  // Tailscale IPs are recognized as trusted private clients
+  assert.equal(isPrivateLanIp('100.85.12.34'), true);
+
+  const lanHorizon = resolveSplitHorizonIp('192.168.1.50', '192.168.1.159', '100.85.12.34');
+  assert.equal(lanHorizon.horizon, 'LAN');
+  assert.equal(lanHorizon.answerIp, '192.168.1.159');
+
+  const tsHorizon = resolveSplitHorizonIp('100.90.4.12', '192.168.1.159', '100.85.12.34');
+  assert.equal(tsHorizon.horizon, 'TAILSCALE');
+  assert.equal(tsHorizon.answerIp, '100.85.12.34');
+
+  const services = [parseServicePair('ollama=11434')];
+  const tsDns = simulateDnsQuery('ollama.x', 'A', '192.168.1.159', 'x', services, undefined, {
+    clientIp: '100.90.4.12',
+    tailscaleIp: '100.85.12.34',
+  });
+  assert.equal(tsDns.answers[0], 'ollama.x. 60 IN A 100.85.12.34');
+});
+
+test('authorizeAgentMcpCall enforces Zero-Trust Read-Only default and Scoped Bearer Token for mutations', () => {
+  // Public IP blocked even for read-only
+  const pubRead = authorizeAgentMcpCall({
+    toolName: 'callsign_list_services',
+    clientIp: '8.8.4.4',
+    allowMutations: true,
+  });
+  assert.equal(pubRead.allowed, false);
+  assert.equal(pubRead.status, 403);
+
+  // Tailscale peer allowed for read-only discovery
+  const tsRead = authorizeAgentMcpCall({
+    toolName: 'callsign_resolve',
+    clientIp: '100.90.4.12',
+    allowMutations: false,
+  });
+  assert.equal(tsRead.allowed, true);
+
+  // Mutation blocked when allowMutations is false
+  const blockedWrite = authorizeAgentMcpCall({
+    toolName: 'callsign_register_service',
+    clientIp: '127.0.0.1',
+    allowMutations: false,
+  });
+  assert.equal(blockedWrite.allowed, false);
+
+  // Mutation blocked when Bearer token does not match
+  const badTokenWrite = authorizeAgentMcpCall({
+    toolName: 'callsign_register_service',
+    clientIp: '100.90.4.12',
+    allowMutations: true,
+    expectedToken: 'cs_tok_secret123',
+    authHeader: 'Bearer wrong_token',
+  });
+  assert.equal(badTokenWrite.allowed, false);
+  assert.equal(badTokenWrite.status, 401);
+
+  // Mutation allowed with valid Bearer token
+  const validTokenWrite = authorizeAgentMcpCall({
+    toolName: 'callsign_register_service',
+    clientIp: '100.90.4.12',
+    allowMutations: true,
+    expectedToken: 'cs_tok_secret123',
+    authHeader: 'Bearer cs_tok_secret123',
+  });
+  assert.equal(validTokenWrite.allowed, true);
+  assert.equal(validTokenWrite.status, 200);
+});
+
 test('buildUniversalApkBundleBytes generates valid PKZIP APK archive with bundled assets/callsign.json and classes.dex', () => {
   const apkBytes = buildUniversalApkBundleBytes({
     lanIp: '192.168.1.159',

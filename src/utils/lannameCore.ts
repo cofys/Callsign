@@ -4,6 +4,8 @@ export interface ServiceMapping {
   hostPort: string;
   online: boolean;
   latencyMs: number;
+  tags?: string[];
+  exposure?: 'all' | 'lan-only';
 }
 
 export interface ServicePreset {
@@ -348,17 +350,52 @@ export function simulateMdnsQuery(
   };
 }
 
+export function isTailscaleIp(ip: string): boolean {
+  const clean = ip.trim().toLowerCase();
+  if (clean.startsWith('100.')) {
+    const parts = clean.split('.');
+    if (parts.length === 4) {
+      const secondOctet = Number(parts[1]);
+      if (Number.isInteger(secondOctet) && secondOctet >= 64 && secondOctet <= 127) {
+        return true;
+      }
+    }
+  }
+  if (clean.startsWith('fd7a:115c:a1e0:')) {
+    return true;
+  }
+  return false;
+}
+
+export function resolveSplitHorizonIp(
+  clientIp: string,
+  lanIp: string,
+  tailscaleIp?: string
+): { answerIp: string; horizon: 'LAN' | 'TAILSCALE' | 'BLOCKED' } {
+  if (!isPrivateLanIp(clientIp)) {
+    return { answerIp: '', horizon: 'BLOCKED' };
+  }
+  if (tailscaleIp && tailscaleIp.trim() && isTailscaleIp(clientIp)) {
+    return { answerIp: tailscaleIp.trim(), horizon: 'TAILSCALE' };
+  }
+  return { answerIp: lanIp.trim(), horizon: 'LAN' };
+}
+
 export function simulateDnsQuery(
   rawQname: string,
   qtype: 'A' | 'AAAA' | 'TXT' | 'ANY',
   lanIp: string,
   domain: string,
   services: ServiceMapping[],
-  upstreams: string[] = ['1.1.1.1:53', '8.8.8.8:53']
+  upstreams: string[] = ['1.1.1.1:53', '8.8.8.8:53'],
+  options?: { clientIp?: string; tailscaleIp?: string }
 ): DnsPacketSimulation {
   const cleanName = rawQname.trim().toLowerCase().replace(/\.+$/, '');
   const fqdn = `${cleanName}.`;
   const cleanDomain = normalizeDomain(domain);
+  const clientIp = options?.clientIp?.trim() || lanIp;
+  const horizonResult = resolveSplitHorizonIp(clientIp, lanIp, options?.tailscaleIp);
+  const effectiveIp = horizonResult.answerIp || lanIp;
 
   // 1. Browser DoH Canary Protection
   if (
@@ -430,6 +467,11 @@ export function simulateDnsQuery(
         cleanName === `${s.name}.local`
     );
 
+    const horizonNote =
+      horizonResult.horizon === 'TAILSCALE'
+        ? `Tailscale Split-Horizon active (query from ${clientIp} -> answered with Tailscale IP ${effectiveIp}).`
+        : `LAN Split-Horizon active (query from ${clientIp} -> answered with LAN IP ${effectiveIp}).`;
+
     return {
       protocol: 'Unicast DNS (UDP/TCP 53)',
       questionName: fqdn,
@@ -438,11 +480,11 @@ export function simulateDnsQuery(
       authoritative: true,
       cacheFlush: false,
       ttlSeconds: 60,
-      answers: [`${fqdn} 60 IN A ${lanIp}`],
+      answers: [`${fqdn} 60 IN A ${effectiveIp}`],
       extra: [],
       explanation: matchedSvc
-        ? `Authoritative local A record resolving ${fqdn} -> ${lanIp} (reverse proxy routes Host: ${cleanName} -> ${matchedSvc.targetUrl}).`
-        : `Authoritative local A record resolving ${fqdn} -> ${lanIp} (LAN Hub / Wildcard).`,
+        ? `${horizonNote} Reverse proxy routes Host: ${cleanName} -> ${matchedSvc.targetUrl}.`
+        : `${horizonNote} Resolves ${fqdn} -> ${effectiveIp} (Hub / Wildcard).`,
       replyDestination: 'Client Stub Resolver (UDP/TCP 53)',
     };
   }
@@ -464,8 +506,8 @@ export function simulateDnsQuery(
 }
 
 /**
- * Enforces Private LAN ACL on Port 53 so that if a router accidentally exposes port 53
- * via UPnP or DMZ, public internet queries are refused (RcodeRefused).
+ * Enforces Private LAN + Tailscale CGNAT ACL on Port 53 so that if a router accidentally
+ * exposes port 53 via UPnP or DMZ, public internet queries are refused (RcodeRefused).
  */
 export function isPrivateLanIp(ip: string): boolean {
   const clean = ip.trim().toLowerCase();
@@ -481,6 +523,10 @@ export function isPrivateLanIp(ip: string): boolean {
       return true;
     }
   }
+  // Tailscale CGNAT (100.64.0.0/10) and Tailscale IPv6 ULA (fd7a:115c:a1e0::/48)
+  if (isTailscaleIp(clean)) {
+    return true;
+  }
   // IPv6 ULA (fc00::/7 -> fc.. or fd..) and Link-Local (fe80::/10)
   if (clean.startsWith('fc') || clean.startsWith('fd') || clean.startsWith('fe80:')) {
     return true;
@@ -489,14 +535,78 @@ export function isPrivateLanIp(ip: string): boolean {
 }
 
 /**
+ * Enforces Zero-Trust security on AI Agent MCP / Function Calling tool invocations:
+ * - Rejects requests from public internet IPs (outside LAN / Tailscale CGNAT).
+ * - Allows read-only discovery tools (list_services, resolve, check_health) from trusted LAN/Tailscale peers.
+ * - Requires explicit mutation permission AND optional Scoped Bearer Token for mutating tools (register/remove).
+ */
+export function authorizeAgentMcpCall(params: {
+  toolName: string;
+  clientIp: string;
+  authHeader?: string;
+  expectedToken?: string;
+  allowMutations: boolean;
+}): { allowed: boolean; status: number; reason: string } {
+  if (!isPrivateLanIp(params.clientIp)) {
+    return {
+      allowed: false,
+      status: 403,
+      reason: `Rejected untrusted client IP (${params.clientIp}) outside RFC1918 LAN and Tailscale 100.64.0.0/10`,
+    };
+  }
+
+  const isMutationTool =
+    params.toolName === 'callsign_register_service' ||
+    params.toolName === 'callsign_remove_service';
+
+  if (!isMutationTool) {
+    return {
+      allowed: true,
+      status: 200,
+      reason: 'Read-only discovery tool permitted for verified LAN / Tailscale peer',
+    };
+  }
+
+  if (!params.allowMutations) {
+    return {
+      allowed: false,
+      status: 403,
+      reason: 'Agent mutations are disabled (Read-Only Discovery Mode active). Enable Agent Write Mode or pass --allow-agent-mutations.',
+    };
+  }
+
+  const requiredTok = (params.expectedToken || '').trim();
+  if (requiredTok) {
+    const provided = (params.authHeader || '')
+      .trim()
+      .replace(/^Bearer\s+/i, '')
+      .trim();
+    if (provided !== requiredTok) {
+      return {
+        allowed: false,
+        status: 401,
+        reason: 'Missing or invalid Authorization: Bearer <token> for mutating agent tool call',
+      };
+    }
+  }
+
+  return {
+    allowed: true,
+    status: 200,
+    reason: 'Authorized agent mutation with valid bearer token and LAN/Tailscale ACL',
+  };
+}
+
+/**
  * Defends /api/services mutations against Cross-Site Request Forgery (CSRF) and DNS Rebinding
- * from malicious websites visited while on the home LAN.
+ * from malicious websites visited while on the home LAN or Tailscale.
  */
 export function verifyMutationRequestOrigin(params: {
   hostHeader: string;
   originHeader?: string;
   secFetchSite?: string;
   lanIp: string;
+  tailscaleIp?: string;
   domain: string;
 }): { allowed: boolean; reason: string } {
   const secFetch = (params.secFetchSite || '').trim().toLowerCase();
@@ -516,6 +626,9 @@ export function verifyMutationRequestOrigin(params: {
     cleanDomain,
     `${cleanDomain}.local`,
   ]);
+  if (params.tailscaleIp?.trim()) {
+    allowedHosts.add(params.tailscaleIp.trim().toLowerCase());
+  }
 
   if (!allowedHosts.has(cleanHost)) {
     return {

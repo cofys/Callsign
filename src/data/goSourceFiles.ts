@@ -9,6 +9,7 @@ import sockoptWindowsGoRaw from '../../internal/mdns/sockopt_windows.go?raw';
 import dnsServerGoRaw from '../../internal/dnsserver/server.go?raw';
 import hostsGoRaw from '../../internal/hosts/hosts.go?raw';
 import proxyGoRaw from '../../internal/proxy/proxy.go?raw';
+import mcpServerGoRaw from '../../internal/mcp/server.go?raw';
 import dashboardGoRaw from '../../internal/dashboard/dashboard.go?raw';
 import androidManifestRaw from '../../android/AndroidManifest.xml?raw';
 import androidMainActivityRaw from '../../android/MainActivity.kt?raw';
@@ -34,7 +35,7 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
   {
     path: 'cmd/lanname/main.go',
     packageName: 'main',
-    summary: 'CLI parser, subcommands (serve, add, rm, ls, doctor), startup banner, and signal handling',
+    summary: 'CLI parser, subcommands (serve, add, rm, ls, mcp, doctor), Tailscale probe, and signal handling',
     content: mainGoRaw,
   },
   {
@@ -46,7 +47,7 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
   {
     path: 'internal/netutil/netutil.go',
     packageName: 'netutil',
-    summary: 'Primary LAN IPv4 routing probe, multicast interface discovery, Docker/WSL2 check, and TCP prober',
+    summary: 'Primary LAN IPv4 probe, Tailscale CGNAT (100.64.0.0/10) & IPv6 ULA detector, multicast discovery, and TCP prober',
     content: netutilGoRaw,
   },
   {
@@ -76,13 +77,19 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
   {
     path: 'internal/dnsserver/server.go',
     packageName: 'dnsserver',
-    summary: 'Authoritative UDP/TCP 53 *.domain responder, Private LAN ACL, _lanname.<domain> TXT identity probe, and DoH canary blocker',
+    summary: 'Source-IP Split-Horizon DNS (LAN IP vs Tailscale 100.64.0.0/10 IP), Private/CGNAT ACL, and DoH canary blocker',
     content: dnsServerGoRaw,
+  },
+  {
+    path: 'internal/mcp/server.go',
+    packageName: 'mcp',
+    summary: 'Model Context Protocol (MCP) JSON-RPC 2.0 server over stdio and Streamable HTTP (/mcp) with zero-trust token security',
+    content: mcpServerGoRaw,
   },
   {
     path: 'internal/hosts/hosts.go',
     packageName: 'hosts',
-    summary: 'Cross-platform fenced # BEGIN LANNAME ... # END LANNAME manager for /etc/hosts',
+    summary: 'Cross-platform fenced # BEGIN CALLSIGN ... # END CALLSIGN manager for /etc/hosts',
     content: hostsGoRaw,
   },
   {
@@ -94,19 +101,19 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
   {
     path: 'internal/dashboard/dashboard.go',
     packageName: 'dashboard',
-    summary: 'Live Web Hub, /api/identity, /setup/lanname-companion.apk, and iOS .mobileconfig builder',
+    summary: 'Live Web Hub, /api/identity, /setup/callsign-companion.apk, and iOS .mobileconfig builder',
     content: dashboardGoRaw,
   },
   {
     path: 'android/AndroidManifest.xml',
     packageName: 'companion-apk',
-    summary: 'Universal Android APK manifest with VpnService binding and lanname://configure QR deep-link intent filter',
+    summary: 'Universal Android APK manifest with VpnService binding and callsign://configure QR deep-link intent filter',
     content: androidManifestRaw,
   },
   {
     path: 'android/MainActivity.kt',
     packageName: 'companion-apk',
-    summary: 'Minimalist 1-button Android Activity with QR deep-link auto-setup and bundled assets/lanname.json loader',
+    summary: 'Minimalist 1-button Android Activity with QR deep-link auto-setup and bundled assets/callsign.json loader',
     content: androidMainActivityRaw,
   },
   {
@@ -124,14 +131,13 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
   {
     path: '.github/workflows/build-android-apk.yml',
     packageName: 'ci-cd',
-    summary: 'Automated GitHub Actions workflow to compile and sign lanname-companion-universal.apk in the cloud',
+    summary: 'Automated GitHub Actions workflow to compile and sign callsign-companion-universal.apk in the cloud',
     content: androidWorkflowRaw,
   },
   {
     path: 'README.md',
     packageName: 'docs',
-    summary: 'Quickstart, Linux setcap cap_net_bind_service one-liner, Docker --net=host usage, and FAQ',
+    summary: 'Quickstart, Tailscale Split-DNS setup, AI Agent MCP integration, Linux setcap one-liner, and FAQ',
     content: readmeMdRaw,
   },
 ];
-

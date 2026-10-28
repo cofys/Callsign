@@ -155,6 +155,50 @@ func isPrivateLANIPv4(ip net.IP) bool {
 	}
 }
 
+// IsTailscaleIP returns true if ip belongs to the Tailscale CGNAT range (100.64.0.0/10)
+// or Tailscale IPv6 ULA prefix (fd7a:115c:a1e0::/48).
+func IsTailscaleIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127
+	}
+	ip16 := ip.To16()
+	if ip16 != nil {
+		// fd7a:115c:a1e0::/48
+		return ip16[0] == 0xfd && ip16[1] == 0x7a &&
+			ip16[2] == 0x11 && ip16[3] == 0x5c &&
+			ip16[4] == 0xa1 && ip16[5] == 0xe0
+	}
+	return false
+}
+
+// TailscaleIPv4 scans active interfaces (such as tailscale0 or utun*) for an assigned
+// Tailscale CGNAT IPv4 address (100.64.0.0/10).
+func TailscaleIPv4() (net.IP, string) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, ""
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ip := extractIPv4(addr)
+			if ip != nil && IsTailscaleIP(ip) {
+				return ip, iface.Name
+			}
+		}
+	}
+	return nil, ""
+}
+
 func isVirtualBridgeName(name string) bool {
 	lower := strings.ToLower(name)
 	prefixes := []string{"docker", "br-", "veth", "virbr", "cni", "flannel", "cali", "tun", "tap"}

@@ -14,8 +14,9 @@ import { ProtocolSimulatorView } from './components/ProtocolSimulatorView';
 import { SourceCodeExplorerView } from './components/SourceCodeExplorerView';
 import { DomainManagerModal } from './components/DomainManagerModal';
 import { SetupWizardView } from './components/SetupWizardView';
+import { AgentHubView } from './components/AgentHubView';
 
-type ActiveTab = 'apps' | 'setup' | 'developer';
+type ActiveTab = 'apps' | 'setup' | 'agents' | 'developer';
 type DevSubTab = 'code' | 'simulator';
 
 export default function App() {
@@ -23,6 +24,11 @@ export default function App() {
   const [devSubTab, setDevSubTab] = useState<DevSubTab>('code');
   const [domain, setDomain] = useState<string>('x');
   const [lanIp] = useState<string>('192.168.1.100');
+  const [tailscaleIp, setTailscaleIp] = useState<string>('100.85.12.34');
+  const [tailscaleEnabled, setTailscaleEnabled] = useState<boolean>(true);
+  const [allowAgentMutations, setAllowAgentMutations] = useState<boolean>(false);
+  const [agentToken, setAgentToken] = useState<string>('cs_tok_9f8e7d6c5b4a3210');
+  const [showAdvancedDrawer, setShowAdvancedDrawer] = useState<boolean>(false);
   const [services, setServices] = useState<ServiceMapping[]>([]);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -172,7 +178,7 @@ export default function App() {
             Callsign
           </a>
 
-          {/* Zone 2: Minimalist 3-Item Navigation */}
+          {/* Zone 2: Minimalist 4-Item Navigation */}
           <nav
             aria-label="Primary Navigation"
             className="flex items-center gap-6 text-sm font-medium text-slate-400"
@@ -197,7 +203,18 @@ export default function App() {
                   : ''
               }`}
             >
-              Phone &amp; Device Setup
+              Phone &amp; Tailscale
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('agents')}
+              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${
+                activeTab === 'agents'
+                  ? 'text-white underline decoration-sky-400 decoration-2 underline-offset-8 font-semibold'
+                  : ''
+              }`}
+            >
+              AI Agents
             </button>
             <button
               type="button"
@@ -249,6 +266,12 @@ export default function App() {
                   <strong className="font-mono text-slate-200">
                     .{domain}
                   </strong>
+                  {tailscaleEnabled && (
+                    <span className="text-slate-500">
+                      {' '}
+                      · Tailscale {tailscaleIp}
+                    </span>
+                  )}
                 </span>
                 <button
                   type="button"
@@ -408,39 +431,137 @@ export default function App() {
               </div>
             )}
 
-            {/* Quiet 1-Line Command Footer */}
-            <div className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-800/80 bg-[#111827] px-5 py-4 sm:flex-row sm:items-center">
-              <div className="min-w-0">
-                <div className="text-xs font-medium text-slate-400">
-                  Run this command on your home computer:
+            {/* Quiet 1-Line Command Footer + Optional Advanced Security Drawer */}
+            <div className="space-y-3">
+              <div className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-800/80 bg-[#111827] px-5 py-4 sm:flex-row sm:items-center">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-slate-400">
+                    Run this command on your home computer:
+                  </div>
+                  <div className="mt-1 font-mono text-xs text-sky-300 truncate select-all">
+                    {cliCommand}
+                  </div>
                 </div>
-                <div className="mt-1 font-mono text-xs text-sky-300 truncate select-all">
-                  {cliCommand}
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedDrawer(!showAdvancedDrawer)}
+                    aria-expanded={showAdvancedDrawer}
+                    className="rounded-xl border border-slate-800 bg-[#0b0f19] px-3.5 py-2 text-xs font-medium text-slate-400 hover:text-white whitespace-nowrap shrink-0"
+                  >
+                    {showAdvancedDrawer ? 'Hide Advanced' : 'Advanced Security'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyText('cli', cliCommand)}
+                    className="rounded-xl border border-slate-700 bg-[#0b0f19] px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 whitespace-nowrap shrink-0"
+                  >
+                    {copiedKey === 'cli' ? 'Copied' : 'Copy Command'}
+                  </button>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => handleCopyText('cli', cliCommand)}
-                className="rounded-xl border border-slate-700 bg-[#0b0f19] px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 whitespace-nowrap shrink-0"
-              >
-                {copiedKey === 'cli' ? '✓ Copied' : 'Copy Command'}
-              </button>
+
+              {showAdvancedDrawer && (
+                <div className="rounded-2xl border border-slate-800 bg-[#111827] p-5 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                    <div>
+                      <div className="font-semibold text-white">
+                        Advanced Security &amp; Tailscale Mesh Controls
+                      </div>
+                      <div className="text-slate-400">
+                        Zero-trust defaults are active automatically. Customize Tailscale Split-Horizon or AI Agent permissions below.
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div className="rounded-xl border border-slate-800 bg-[#0b0f19] p-3.5">
+                      <div className="font-medium text-white">
+                        Port 53 Private + CGNAT ACL
+                      </div>
+                      <p className="mt-1 text-slate-400">
+                        Only answers RFC1918 LAN (<code className="font-mono tabular-nums text-slate-300">192.168.0.0/16</code>) and Tailscale (<code className="font-mono tabular-nums text-slate-300">100.64.0.0/10</code>). Public internet queries receive <code className="text-emerald-400">REFUSED</code>.
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-800 bg-[#0b0f19] p-3.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-white">Tailscale Horizon</span>
+                        <button
+                          type="button"
+                          onClick={() => setTailscaleEnabled(!tailscaleEnabled)}
+                          className="text-sky-400 hover:text-sky-300 font-medium"
+                        >
+                          {tailscaleEnabled ? 'Active' : 'Disabled'}
+                        </button>
+                      </div>
+                      <p className="mt-1 text-slate-400">
+                        Answers Tailscale peers with <code className="font-mono tabular-nums text-sky-300">{tailscaleIp}</code> and Wi-Fi peers with <code className="font-mono tabular-nums text-sky-300">{lanIp}</code>.
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-800 bg-[#0b0f19] p-3.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-white">AI Agent MCP Access</span>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('agents')}
+                          className="text-sky-400 hover:text-sky-300 font-medium"
+                        >
+                          Configure
+                        </button>
+                      </div>
+                      <p className="mt-1 text-slate-400">
+                        Mode: <strong className="text-slate-200">{allowAgentMutations ? 'Token-Authenticated Read/Write' : 'Read-Only Discovery'}</strong>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* TAB 2: SIMPLE PHONE & DEVICE SETUP */}
+        {/* TAB 2: SIMPLE PHONE & TAILSCALE SETUP */}
         {activeTab === 'setup' && (
           <SetupWizardView
             domain={domain}
             lanIp={lanIp}
+            tailscaleIp={tailscaleIp}
+            tailscaleEnabled={tailscaleEnabled}
             onSetDomain={setDomain}
+            onSetTailscaleIp={setTailscaleIp}
+            onSetTailscaleEnabled={setTailscaleEnabled}
             onOpenMobileConfig={() => setMobileConfigOpen(true)}
             onOpenAndroidModal={() => setAndroidModalOpen(true)}
           />
         )}
 
-        {/* TAB 3: SOURCE CODE & SIMULATOR (TUCKED AWAY FOR DEVELOPERS) */}
+        {/* TAB 3: AI AGENTS (MCP & TOOL CALLING) */}
+        {activeTab === 'agents' && (
+          <AgentHubView
+            services={services}
+            domain={domain}
+            lanIp={lanIp}
+            tailscaleIp={tailscaleIp}
+            tailscaleEnabled={tailscaleEnabled}
+            allowAgentMutations={allowAgentMutations}
+            agentToken={agentToken}
+            onSetAllowAgentMutations={setAllowAgentMutations}
+            onRegenerateToken={() => {
+              const rand = Math.random().toString(16).slice(2, 14);
+              setAgentToken(`cs_tok_${rand}`);
+            }}
+            onAddService={(name, target) => {
+              const mapping = createServiceMapping(name, target, true, 2);
+              setServices((prev) => {
+                const filtered = prev.filter((item) => item.name !== mapping.name);
+                return [...filtered, mapping].sort((a, b) =>
+                  a.name.localeCompare(b.name)
+                );
+              });
+            }}
+          />
+        )}
+
+        {/* TAB 4: SOURCE CODE & SIMULATOR (TUCKED AWAY FOR DEVELOPERS) */}
         {activeTab === 'developer' && (
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
@@ -449,7 +570,7 @@ export default function App() {
                   Source Code &amp; Protocol Tools
                 </h1>
                 <p className="mt-0.5 text-xs text-slate-400">
-                  Complete Go daemon source, Universal Android APK project, and live packet simulator.
+                  Complete Go daemon source, MCP server, Universal Android APK project, and live packet simulator.
                 </p>
               </div>
 
@@ -463,7 +584,7 @@ export default function App() {
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  Source Files (18)
+                  Source Files (19)
                 </button>
                 <button
                   type="button"
