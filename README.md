@@ -6,6 +6,8 @@
 **No router logins. No port numbers. Native MCP protocol for AI agents.**
 
 [![Go Version](https://img.shields.io/badge/go-1.22+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-7.0-3178C6?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Kotlin](https://img.shields.io/badge/Kotlin-1.9-7F52FF?style=flat&logo=kotlin&logoColor=white)](https://kotlinlang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20%7C%20iOS%20%7C%20Android-lightgrey)](https://github.com/cofys/Callsign)
 [![MCP Ready](https://img.shields.io/badge/MCP-streamable%20HTTP%20%2B%20stdio-purple)](https://modelcontextprotocol.io/)
