@@ -4,7 +4,7 @@ import {
   validateTld,
   simulateMdnsQuery,
   simulateDnsQuery,
-} from '../utils/lannameCore';
+} from '../utils/callsignCore';
 
 interface ProtocolSimulatorViewProps {
   domain: string;

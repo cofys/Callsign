@@ -1,5 +1,5 @@
 import React from 'react';
-import { generateOfflineQrMatrix } from '../utils/lannameCore';
+import { generateOfflineQrMatrix } from '../utils/callsignCore';
 
 interface QrCodeSvgProps {
   value: string;

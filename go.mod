@@ -1,4 +1,4 @@
-module github.com/lanname/lanname
+module github.com/cofys/callsign
 
 go 1.22
 

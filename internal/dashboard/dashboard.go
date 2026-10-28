@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lanname/lanname/internal/config"
-	"github.com/lanname/lanname/internal/netutil"
+	"github.com/cofys/callsign/internal/config"
+	"github.com/cofys/callsign/internal/netutil"
 )
 
 // ServiceStatus represents a service combined with its live TCP probe status.
@@ -32,26 +32,40 @@ type ServiceStatus struct {
 }
 
 // Handler serves the embedded dark-mode Web Dashboard, REST API endpoints (/api/services, /api/status),
-// offline SVG QR code endpoint (/api/qr), and Apple iOS/macOS split-DNS .mobileconfig generator.
+// Streamable HTTP MCP endpoint (/mcp), and Apple iOS/macOS split-DNS .mobileconfig generator.
 type Handler struct {
-	store      *config.Store
-	lanIP      net.IP
-	statusMu   sync.RWMutex
-	statusMap  map[string]netutil.ProbeResult
-	stopProber chan struct{}
+	store       *config.Store
+	lanIP       net.IP
+	tailscaleIP net.IP
+	mcpHandler  http.Handler
+	statusMu    sync.RWMutex
+	statusMap   map[string]netutil.ProbeResult
+	stopProber  chan struct{}
 }
 
 // NewHandler creates a new Dashboard Handler and starts the background TCP health checker.
 func NewHandler(store *config.Store, lanIP net.IP) *Handler {
+	tsIP, _ := netutil.TailscaleIPv4()
 	h := &Handler{
-		store:      store,
-		lanIP:      lanIP.To4(),
-		statusMap:  make(map[string]netutil.ProbeResult),
-		stopProber: make(chan struct{}),
+		store:       store,
+		lanIP:       lanIP.To4(),
+		tailscaleIP: tsIP,
+		statusMap:   make(map[string]netutil.ProbeResult),
+		stopProber:  make(chan struct{}),
 	}
 	h.probeAll()
 	go h.runProberLoop()
 	return h
+}
+
+// SetMCPHandler attaches the Streamable HTTP MCP server to /mcp on the dashboard handler.
+func (h *Handler) SetMCPHandler(mcpHandler http.Handler) {
+	h.mcpHandler = mcpHandler
+}
+
+// SetTailscaleIP sets or overrides the detected Tailscale IPv4 address for host validation.
+func (h *Handler) SetTailscaleIP(tsIP net.IP) {
+	h.tailscaleIP = tsIP
 }
 
 // Close stops the background health prober.
@@ -99,9 +113,19 @@ func (h *Handler) probeAll() {
 	h.statusMu.Unlock()
 }
 
-// ServeHTTP dispatches dashboard UI and API routes.
+// ServeHTTP dispatches dashboard UI, MCP (/mcp), and API routes.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case r.URL.Path == "/mcp":
+		if !h.isAllowedDashboardHost(r.Host) {
+			http.Error(w, "MCP endpoint is only available on the Callsign dashboard host", http.StatusForbidden)
+			return
+		}
+		if h.mcpHandler == nil {
+			http.Error(w, "MCP server not configured", http.StatusNotFound)
+			return
+		}
+		h.mcpHandler.ServeHTTP(w, r)
 	case r.URL.Path == "/api/identity" && r.Method == http.MethodGet:
 		h.handleGetIdentity(w, r)
 	case r.URL.Path == "/api/status" && r.Method == http.MethodGet:
@@ -114,11 +138,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleDeleteService(w, r)
 	case r.URL.Path == "/setup/ios.mobileconfig" && r.Method == http.MethodGet:
 		h.handleIOSMobileConfig(w, r)
-	case r.URL.Path == "/setup/lanname-companion.apk" && r.Method == http.MethodGet:
+	case (r.URL.Path == "/setup/callsign-companion.apk" || r.URL.Path == "/setup/lanname-companion.apk") && r.Method == http.MethodGet:
 		h.handleAndroidCompanionAPK(w, r)
 	default:
 		h.handleIndexHTML(w, r)
 	}
+}
+
+func (h *Handler) isAllowedDashboardHost(rawHost string) bool {
+	host := strings.ToLower(strings.TrimSpace(rawHost))
+	if hName, _, err := net.SplitHostPort(host); err == nil {
+		host = hName
+	}
+	if host == "" || host == "127.0.0.1" || host == "localhost" || host == "::1" {
+		return true
+	}
+	if h.lanIP != nil && host == strings.ToLower(h.lanIP.String()) {
+		return true
+	}
+	if h.tailscaleIP != nil && host == strings.ToLower(h.tailscaleIP.String()) {
+		return true
+	}
+	domain := h.store.Domain()
+	return host == domain || host == domain+".local"
 }
 
 // isAllowedMutationRequest defends against CSRF and DNS-Rebinding attacks from external websites
@@ -135,13 +177,7 @@ func (h *Handler) isAllowedMutationRequest(r *http.Request) bool {
 	if hName, _, err := net.SplitHostPort(host); err == nil {
 		host = hName
 	}
-	domain := h.store.Domain()
-	allowedHost := host == "127.0.0.1" ||
-		host == "localhost" ||
-		host == h.lanIP.String() ||
-		host == domain ||
-		host == domain+".local"
-	if !allowedHost {
+	if !h.isAllowedDashboardHost(host) {
 		return false
 	}
 
@@ -294,6 +330,11 @@ func GenerateMobileConfigXML(domain, lanIP string) string {
 		cleanDomain = "lan"
 	}
 
+	// COMPATIBILITY NOTE: Do NOT change the "lanname-*" UUID seeds or the
+	// "io.lanname.dns.*" / "io.lanname.profile.*" PayloadIdentifier strings below.
+	// They are internal Apple Configuration Profile plumbing; changing them would
+	// orphan profiles already installed on users' iPhones, iPads, and Macs instead
+	// of cleanly updating them in place.
 	outerUUID := deterministicUUID("lanname-profile-" + cleanDomain + "-" + lanIP)
 	innerUUID := deterministicUUID("lanname-dns-payload-" + cleanDomain + "-" + lanIP)
 
@@ -321,7 +362,7 @@ func GenerateMobileConfigXML(domain, lanIP string) string {
 			<key>PayloadDescription</key>
 			<string>Routes *.%s local LAN domains to %s</string>
 			<key>PayloadDisplayName</key>
-			<string>lanname (.%s Split-DNS)</string>
+			<string>Callsign (.%s Split-DNS)</string>
 			<key>PayloadIdentifier</key>
 			<string>io.lanname.dns.%s.settings</string>
 			<key>PayloadType</key>
@@ -333,13 +374,13 @@ func GenerateMobileConfigXML(domain, lanIP string) string {
 		</dict>
 	</array>
 	<key>PayloadDescription</key>
-	<string>Zero-config split-DNS profile generated by lanname so your iPhone, iPad, or Mac resolves *.%s directly via %s without changing router DHCP.</string>
+	<string>Zero-config split-DNS profile generated by Callsign so your iPhone, iPad, or Mac resolves *.%s directly via %s without changing router DHCP.</string>
 	<key>PayloadDisplayName</key>
-	<string>lanname — .%s Local Domain</string>
+	<string>Callsign — .%s Local Domain</string>
 	<key>PayloadIdentifier</key>
 	<string>io.lanname.profile.%s</string>
 	<key>PayloadOrganization</key>
-	<string>lanname Homelab</string>
+	<string>Callsign</string>
 	<key>PayloadRemovalDisallowed</key>
 	<false/>
 	<key>PayloadType</key>
@@ -377,7 +418,7 @@ func deterministicUUID(seed string) string {
 func (h *Handler) handleIOSMobileConfig(w http.ResponseWriter, r *http.Request) {
 	domain := h.store.Domain()
 	xml := GenerateMobileConfigXML(domain, h.lanIP.String())
-	filename := fmt.Sprintf("lanname-%s.mobileconfig", domain)
+	filename := fmt.Sprintf("callsign-%s.mobileconfig", domain)
 	w.Header().Set("Content-Type", "application/x-apple-aspen-config; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	_, _ = w.Write([]byte(xml))
@@ -385,17 +426,19 @@ func (h *Handler) handleIOSMobileConfig(w http.ResponseWriter, r *http.Request) 
 
 func (h *Handler) handleAndroidCompanionAPK(w http.ResponseWriter, r *http.Request) {
 	domain := h.store.Domain()
-	filename := fmt.Sprintf("lanname-companion-%s-universal.apk", domain)
+	filename := fmt.Sprintf("callsign-companion-%s-universal.apk", domain)
 	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 
 	// If a pre-built universal APK exists alongside the daemon, serve it directly:
-	if rawApk, err := os.ReadFile("lanname-companion-universal.apk"); err == nil && len(rawApk) > 0 {
-		_, _ = w.Write(rawApk)
-		return
+	for _, candidate := range []string{"callsign-companion-universal.apk", "lanname-companion-universal.apk"} {
+		if rawApk, err := os.ReadFile(candidate); err == nil && len(rawApk) > 0 {
+			_, _ = w.Write(rawApk)
+			return
+		}
 	}
 
-	// Otherwise, dynamically package an APK archive pre-seeded with assets/lanname.json
+	// Otherwise, dynamically package an APK archive pre-seeded with assets/callsign.json
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 
@@ -403,14 +446,14 @@ func (h *Handler) handleAndroidCompanionAPK(w http.ResponseWriter, r *http.Reque
 		"lanIp":      h.lanIP.String(),
 		"domain":     domain,
 		"instanceId": h.store.InstanceID(),
-		"deepLink":   fmt.Sprintf("lanname://configure?ip=%s&domain=%s&id=%s", h.lanIP.String(), domain, h.store.InstanceID()),
+		"deepLink":   fmt.Sprintf("callsign://configure?ip=%s&domain=%s&id=%s", h.lanIP.String(), domain, h.store.InstanceID()),
 	}, "", "  ")
 
-	if fw, err := zw.Create("assets/lanname.json"); err == nil {
+	if fw, err := zw.Create("assets/callsign.json"); err == nil {
 		_, _ = fw.Write(cfgBytes)
 	}
 	if fw, err := zw.Create("META-INF/MANIFEST.MF"); err == nil {
-		_, _ = fw.Write([]byte("Manifest-Version: 1.0\r\nPackage-Name: dev.lanname.companion\r\n\r\n"))
+		_, _ = fw.Write([]byte("Manifest-Version: 1.0\r\nPackage-Name: dev.callsign.companion\r\n\r\n"))
 	}
 	_ = zw.Close()
 	_, _ = w.Write(buf.Bytes())
@@ -427,7 +470,7 @@ const dashboardHTML = `<!DOCTYPE html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>lanname — Local Network Hub</title>
+  <title>Callsign — Local Network Hub</title>
   <style>
     :root {
       color-scheme: dark;
@@ -597,7 +640,7 @@ const dashboardHTML = `<!DOCTYPE html>
   <div class="container">
     <header>
       <div class="brand">
-        <h1 id="hub-title">lanname Hub</h1>
+        <h1 id="hub-title">Callsign Hub</h1>
         <p id="hub-subtitle">Loading LAN telemetry…</p>
       </div>
       <div class="header-actions">
@@ -667,7 +710,7 @@ const dashboardHTML = `<!DOCTYPE html>
 
       const grid = document.getElementById('service-grid');
       if (!data.services || data.services.length === 0) {
-        grid.innerHTML = '<div class="card"><p style="color:var(--muted)">No services configured yet. Click "+ Add Service" or run <code>lanname add hq=3100</code>.</p></div>';
+        grid.innerHTML = '<div class="card"><p style="color:var(--muted)">No services configured yet. Click "+ Add Service" or run <code>callsign add plex=32400</code>.</p></div>';
         return;
       }
       document.getElementById('example-local').textContent = data.services[0].localUrl;

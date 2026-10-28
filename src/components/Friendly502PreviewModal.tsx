@@ -1,5 +1,5 @@
 import React from 'react';
-import { ServiceMapping } from '../utils/lannameCore';
+import { ServiceMapping } from '../utils/callsignCore';
 
 interface Friendly502PreviewModalProps {
   service: ServiceMapping | null;

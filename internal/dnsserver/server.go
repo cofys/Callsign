@@ -11,8 +11,8 @@ import (
 
 	"github.com/miekg/dns"
 
-	"github.com/lanname/lanname/internal/config"
-	"github.com/lanname/lanname/internal/netutil"
+	"github.com/cofys/callsign/internal/config"
+	"github.com/cofys/callsign/internal/netutil"
 )
 
 const (

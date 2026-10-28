@@ -78,9 +78,9 @@ function buildMinimalDexBytes(): Uint8Array {
  * - AndroidManifest.xml
  * - classes.dex (universal Dalvik header)
  * - META-INF/MANIFEST.MF
- * - src/MainActivity.kt, src/LannameVpnService.kt, build.gradle.kts (when provided)
+ * - src/MainActivity.kt, src/CallsignVpnService.kt, build.gradle.kts (when provided)
  */
-export function buildUniversalApkBundleBytes(config: ApkBundleConfig): Uint8Array {
+export function buildUniversalApkBundleBytes(config: ApkBundleConfig): Uint8Array<ArrayBuffer> {
   const encoder = new TextEncoder();
 
   const bundledConfigJson = JSON.stringify(
@@ -120,7 +120,7 @@ export function buildUniversalApkBundleBytes(config: ApkBundleConfig): Uint8Arra
   }
   if (config.vpnServiceKt) {
     files.push({
-      name: 'src/LannameVpnService.kt',
+      name: 'src/CallsignVpnService.kt',
       data: encoder.encode(config.vpnServiceKt),
     });
   }

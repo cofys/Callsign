@@ -752,7 +752,7 @@ ${matchDomainsXml}
 			<key>PayloadDisplayName</key>
 			<string>Callsign (.${primaryDomain} Split-DNS)</string>
 			<key>PayloadIdentifier</key>
-			<string>io.callsign.dns.${primaryDomain}.settings</string>
+			<string>io.lanname.dns.${primaryDomain}.settings</string>
 			<key>PayloadType</key>
 			<string>com.apple.dnsSettings.managed</string>
 			<key>PayloadUUID</key>
@@ -766,7 +766,7 @@ ${matchDomainsXml}
 	<key>PayloadDisplayName</key>
 	<string>Callsign — .${primaryDomain} Local Domain</string>
 	<key>PayloadIdentifier</key>
-	<string>io.callsign.profile.${primaryDomain}</string>
+	<string>io.lanname.profile.${primaryDomain}</string>
 	<key>PayloadOrganization</key>
 	<string>Callsign</string>
 	<key>PayloadRemovalDisallowed</key>

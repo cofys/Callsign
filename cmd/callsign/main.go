@@ -17,15 +17,15 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/lanname/lanname/internal/config"
-	"github.com/lanname/lanname/internal/dashboard"
-	"github.com/lanname/lanname/internal/dnsserver"
-	"github.com/lanname/lanname/internal/hosts"
-	"github.com/lanname/lanname/internal/mcp"
-	"github.com/lanname/lanname/internal/mdns"
-	"github.com/lanname/lanname/internal/netutil"
-	"github.com/lanname/lanname/internal/proxy"
-	"github.com/lanname/lanname/internal/tld"
+	"github.com/cofys/callsign/internal/config"
+	"github.com/cofys/callsign/internal/dashboard"
+	"github.com/cofys/callsign/internal/dnsserver"
+	"github.com/cofys/callsign/internal/hosts"
+	"github.com/cofys/callsign/internal/mcp"
+	"github.com/cofys/callsign/internal/mdns"
+	"github.com/cofys/callsign/internal/netutil"
+	"github.com/cofys/callsign/internal/proxy"
+	"github.com/cofys/callsign/internal/tld"
 )
 
 func main() {
@@ -75,7 +75,7 @@ func printUsage() {
 	fmt.Println(`Callsign — Zero-Config LAN & Tailscale Naming + AI Agent MCP Daemon
 
 Usage:
-  callsign serve [name=target...] [--domain x] [--http-port 80] [--dns-port 53] [--config callsign.yaml] [--no-dns] [--no-hosts]
+  callsign serve [name=target...] [--domain x] [--http-port 80] [--dns-port 53] [--config callsign.yaml] [--no-dns] [--no-hosts] [--allow-agent-mutations] [--agent-token <token>]
   callsign add <name=target> [--config callsign.yaml]
   callsign rm <name> [--config callsign.yaml]
   callsign ls [--config callsign.yaml] [--json]
@@ -89,16 +89,18 @@ Examples:
   callsign doctor --domain x`)
 }
 
-// runServe implements `lanname serve [name=target...] [flags]`.
+// runServe implements `callsign serve [name=target...] [flags]`.
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	domainFlag := fs.String("domain", "", "Custom local domain suffix (e.g. cofy, lan, home)")
+	domainFlag := fs.String("domain", "", "Custom local domain suffix (e.g. x, lan, home)")
 	httpPortFlag := fs.Int("http-port", 0, "HTTP & WebSocket reverse proxy port (default 80)")
 	dnsPortFlag := fs.Int("dns-port", 0, "Authoritative DNS + Forwarder port (default 53)")
-	configPath := fs.String("config", config.DefaultConfigPath, "Path to lanname.yaml")
+	configPath := fs.String("config", config.DefaultConfigPath, "Path to callsign.yaml")
 	noDNS := fs.Bool("no-dns", false, "Disable unicast DNS server on port 53")
 	noHosts := fs.Bool("no-hosts", false, "Disable /etc/hosts synchronization")
 	forceTLD := fs.Bool("force", false, "Override Red HSTS-preloaded TLD block")
+	allowMutations := fs.Bool("allow-agent-mutations", false, "Allow AI agents to register or remove services")
+	agentToken := fs.String("agent-token", "", "Bearer token required for mutating agent tool calls over /mcp")
 
 	// Allow flags and positional name=target arguments in any order
 	var pairs []string
@@ -110,7 +112,8 @@ func runServe(args []string) error {
 			if (a == "--domain" || a == "-domain" ||
 				a == "--http-port" || a == "-http-port" ||
 				a == "--dns-port" || a == "-dns-port" ||
-				a == "--config" || a == "-config") && i+1 < len(args) {
+				a == "--config" || a == "-config" ||
+				a == "--agent-token" || a == "-agent-token") && i+1 < len(args) {
 				i++
 				flagArgs = append(flagArgs, args[i])
 			}
@@ -197,7 +200,7 @@ func runServe(args []string) error {
 		defer mdnsResponder.Close()
 	}
 
-	// Register live hot-reload hook whenever services change via API or `lanname add/rm`
+	// Register live hot-reload hook whenever services change via API or `callsign add/rm`
 	store.OnChange(func() {
 		names := buildMDNSHostnames()
 		if mdnsResponder != nil {
@@ -219,15 +222,21 @@ func runServe(args []string) error {
 		}
 	}
 
-	// 3. Start Dashboard + HTTP/WebSocket Reverse Proxy on TCP 80
+	// 3. Start Dashboard + Streamable HTTP MCP (/mcp) + HTTP/WebSocket Reverse Proxy on TCP 80
+	tsIP, _ := netutil.TailscaleIPv4()
+	mcpSrv := mcp.NewServer(store, lanIP, tsIP, *allowMutations, *agentToken)
+
 	dashHandler := dashboard.NewHandler(store, lanIP)
+	dashHandler.SetTailscaleIP(tsIP)
+	dashHandler.SetMCPHandler(mcpSrv)
 	defer dashHandler.Close()
 
 	proxyRouter := proxy.NewRouter(store, lanIP, dashHandler)
+	proxyRouter.SetTailscaleIP(tsIP)
 	httpAddr := fmt.Sprintf("0.0.0.0:%d", store.HTTPPort())
 	httpLn, err := net.Listen("tcp4", httpAddr)
 	if err != nil {
-		return fmt.Errorf("bind HTTP proxy on %s: %w (on Linux, run: sudo setcap 'cap_net_bind_service=+ep' $(which lanname) or pass --http-port 8080)", httpAddr, err)
+		return fmt.Errorf("bind HTTP proxy on %s: %w (on Linux, run: sudo setcap 'cap_net_bind_service=+ep' $(which callsign) or pass --http-port 8080)", httpAddr, err)
 	}
 
 	httpServer := &http.Server{
@@ -235,7 +244,7 @@ func runServe(args []string) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// 4. Start Local Admin Control Socket (127.0.0.1:43199) for hot-reload via `lanname add` / `lanname rm` / `lanname ls`
+	// 4. Start Local Admin Control Socket (127.0.0.1:43199) for hot-reload via `callsign add` / `callsign rm` / `callsign ls`
 	adminServer := startAdminServer(dashHandler)
 	defer func() {
 		if adminServer != nil {
@@ -259,7 +268,7 @@ func runServe(args []string) error {
 	if !store.NoHosts() {
 		_ = hostsMgr.Cleanup()
 	}
-	fmt.Println("\nlanname stopped cleanly.")
+	fmt.Println("\nCallsign stopped cleanly.")
 	return nil
 }
 
@@ -286,7 +295,7 @@ func printStartupBanner(store *config.Store, lanIP net.IP, iface string, mdnsAct
 	}
 
 	fmt.Println("╭──────────────────────────────────────────────────────────────────────────╮")
-	fmt.Printf("│  lanname daemon online · LAN IP: %-15s (%s)%*s│\n", lanIP.String(), iface, maxInt(0, 21-len(iface)), "")
+	fmt.Printf("│  Callsign daemon online · LAN IP: %-15s (%s)%*s│\n", lanIP.String(), iface, maxInt(0, 20-len(iface)), "")
 	fmt.Println("╰──────────────────────────────────────────────────────────────────────────╯")
 	fmt.Printf("  Dashboard Hub   : http://%s.local%s  |  http://%s%s\n", domain, portSuffix, domain, portSuffix)
 	if mdnsActive {
@@ -324,15 +333,15 @@ func maxInt(a, b int) int {
 	return b
 }
 
-// runAdd implements `lanname add <name=target>`.
+// runAdd implements `callsign add <name=target>`.
 func runAdd(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
-	configPath := fs.String("config", config.DefaultConfigPath, "Path to lanname.yaml")
+	configPath := fs.String("config", config.DefaultConfigPath, "Path to callsign.yaml")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return errors.New("usage: lanname add <name=target>")
+		return errors.New("usage: callsign add <name=target>")
 	}
 
 	svc, err := config.ParseServicePair(fs.Arg(0))
@@ -354,7 +363,7 @@ func runAdd(args []string) error {
 		}
 	}
 
-	// Fallback: update lanname.yaml directly on disk
+	// Fallback: update callsign.yaml directly on disk
 	store := config.NewStore(*configPath)
 	if err := store.Load(); err != nil {
 		return err
@@ -363,19 +372,19 @@ func runAdd(args []string) error {
 	if err := store.Save(); err != nil {
 		return err
 	}
-	fmt.Printf("✓ Saved %s -> %s to %s (daemon not running; start with `lanname serve`)\n", svc.Name, svc.TargetURL, store.Path())
+	fmt.Printf("✓ Saved %s -> %s to %s (daemon not running; start with `callsign serve`)\n", svc.Name, svc.TargetURL, store.Path())
 	return nil
 }
 
-// runRemove implements `lanname rm <name>`.
+// runRemove implements `callsign rm <name>`.
 func runRemove(args []string) error {
 	fs := flag.NewFlagSet("rm", flag.ContinueOnError)
-	configPath := fs.String("config", config.DefaultConfigPath, "Path to lanname.yaml")
+	configPath := fs.String("config", config.DefaultConfigPath, "Path to callsign.yaml")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return errors.New("usage: lanname rm <name>")
+		return errors.New("usage: callsign rm <name>")
 	}
 	name := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
 
@@ -402,10 +411,10 @@ func runRemove(args []string) error {
 	return nil
 }
 
-// runList implements `lanname ls`.
+// runList implements `callsign ls`.
 func runList(args []string) error {
 	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
-	configPath := fs.String("config", config.DefaultConfigPath, "Path to lanname.yaml")
+	configPath := fs.String("config", config.DefaultConfigPath, "Path to callsign.yaml")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -457,9 +466,9 @@ func printServiceStatusTable(domain, lanIP string, services []dashboard.ServiceS
 	if daemonLive {
 		stateLabel = "running"
 	}
-	fmt.Printf("lanname (%s) · LAN IP: %s · Domain: .%s\n\n", stateLabel, lanIP, domain)
+	fmt.Printf("Callsign (%s) · LAN IP: %s · Domain: .%s\n\n", stateLabel, lanIP, domain)
 	if len(services) == 0 {
-		fmt.Println("No services configured. Add one with: lanname add hq=3100")
+		fmt.Println("No services configured. Add one with: callsign add plex=32400")
 		return
 	}
 
@@ -476,16 +485,16 @@ func printServiceStatusTable(domain, lanIP string, services []dashboard.ServiceS
 	_ = tw.Flush()
 }
 
-// runDoctor implements `lanname doctor`.
+// runDoctor implements `callsign doctor`.
 func runDoctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	domain := fs.String("domain", "cofy", "Domain suffix to validate")
+	domain := fs.String("domain", "x", "Domain suffix to validate")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	fmt.Println("lanname network diagnostics")
-	fmt.Println("───────────────────────────")
+	fmt.Println("Callsign network diagnostics")
+	fmt.Println("────────────────────────────")
 
 	// 1. Primary LAN IPv4
 	ip, iface, err := netutil.PrimaryLANIPv4()

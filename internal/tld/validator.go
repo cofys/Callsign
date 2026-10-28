@@ -32,7 +32,7 @@ var redTLDs = map[string]string{
 	"foo":       "HSTS-preloaded TLD; browsers force HTTPS on *.foo",
 	"day":       "HSTS-preloaded TLD; browsers force HTTPS on *.day",
 	"channel":   "HSTS-preloaded TLD; browsers force HTTPS on *.channel",
-	"local":     "Reserved by RFC 6762 for Multicast DNS (mDNS); lanname already announces *.local automatically via UDP 5353",
+	"local":     "Reserved by RFC 6762 for Multicast DNS (mDNS); Callsign already announces *.local automatically via UDP 5353",
 	"localhost": "Reserved by RFC 6761 as loopback; browsers resolve *.localhost to 127.0.0.1 internally and ignore LAN DNS",
 }
 
@@ -61,7 +61,7 @@ var yellowTLDs = map[string]bool{
 func Validate(domain string, force bool) ValidationResult {
 	clean := strings.ToLower(strings.Trim(strings.TrimSpace(domain), "."))
 	if clean == "" {
-		clean = "lan"
+		clean = "x"
 	}
 
 	// Check final label if user passed a multi-label suffix like "home.arpa" or "my.dev"
@@ -74,7 +74,7 @@ func Validate(domain string, force bool) ValidationResult {
 			Tier:   TierRed,
 			Title:  fmt.Sprintf("Unsafe Domain Suffix (.%s)", clean),
 			Message: fmt.Sprintf(
-				"%s. Choose a safe private suffix like --domain cofy, --domain lan, or --domain home (or pass --force to override).",
+				"%s. Choose a safe private suffix like --domain x, --domain lan, or --domain home (or pass --force to override).",
 				reason,
 			),
 			Blocked: !force,
@@ -87,7 +87,7 @@ func Validate(domain string, force bool) ValidationResult {
 			Tier:   TierRed,
 			Title:  fmt.Sprintf("Unsafe Parent TLD (.%s)", lastLabel),
 			Message: fmt.Sprintf(
-				"%s. Choose a safe private suffix like --domain cofy, --domain lan, or --domain home (or pass --force to override).",
+				"%s. Choose a safe private suffix like --domain x, --domain lan, or --domain home (or pass --force to override).",
 				reason,
 			),
 			Blocked: !force,
@@ -100,7 +100,7 @@ func Validate(domain string, force bool) ValidationResult {
 			Tier:   TierYellow,
 			Title:  fmt.Sprintf("Public ICANN TLD Warning (.%s)", clean),
 			Message: fmt.Sprintf(
-				".%s is a delegated public internet TLD. Shadowing it on your LAN can mask real internet domains and leak internal hostnames when laptops roam off-Wi-Fi. Consider an unallocated suffix like --domain cofy or --domain home.arpa.",
+				".%s is a delegated public internet TLD. Shadowing it on your LAN can mask real internet domains and leak internal hostnames when laptops roam off-Wi-Fi. Consider an unallocated suffix like --domain x or --domain home.arpa.",
 				clean,
 			),
 			Blocked: false,

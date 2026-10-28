@@ -3,7 +3,7 @@ import { QrCodeSvg } from './QrCodeSvg';
 import { buildUniversalApkBundleBytes } from '../utils/apkBundleGenerator';
 import androidManifestRaw from '../../android/AndroidManifest.xml?raw';
 import mainActivityKtRaw from '../../android/MainActivity.kt?raw';
-import lannameVpnKtRaw from '../../android/LannameVpnService.kt?raw';
+import callsignVpnKtRaw from '../../android/CallsignVpnService.kt?raw';
 import buildGradleKtRaw from '../../android/build.gradle.kts?raw';
 
 interface AndroidCompanionModalProps {
@@ -36,7 +36,7 @@ export const AndroidCompanionModal: React.FC<AndroidCompanionModalProps> = ({
       instanceId: 'cs-9f8e7d6c5b4a3210',
       manifestXml: androidManifestRaw,
       mainActivityKt: mainActivityKtRaw,
-      vpnServiceKt: lannameVpnKtRaw,
+      vpnServiceKt: callsignVpnKtRaw,
       buildGradleKts: buildGradleKtRaw,
     });
     const blob = new Blob([bytes], {

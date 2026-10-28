@@ -10,25 +10,29 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lanname/lanname/internal/config"
+	"github.com/cofys/callsign/internal/config"
+	"github.com/cofys/callsign/internal/netutil"
 )
 
 // Router dispatches incoming HTTP/WebSocket requests on port 80 either to the matching
 // upstream service (when Host matches <service>.local or <service>.<domain>) or to the
-// embedded Web Dashboard when Host matches the base hub (<domain>.local, <domain>, <LAN_IP>, localhost).
+// embedded Web Dashboard when Host matches the base hub (<domain>.local, <domain>, <LAN_IP>, <TAILSCALE_IP>, localhost).
 type Router struct {
-	store     *config.Store
-	lanIP     net.IP
-	dashboard http.Handler
-	transport *http.Transport
+	store       *config.Store
+	lanIP       net.IP
+	tailscaleIP net.IP
+	dashboard   http.Handler
+	transport   *http.Transport
 }
 
 // NewRouter creates a new reverse-proxy and dashboard HTTP router.
 func NewRouter(store *config.Store, lanIP net.IP, dashboard http.Handler) *Router {
+	tsIP, _ := netutil.TailscaleIPv4()
 	return &Router{
-		store:     store,
-		lanIP:     lanIP,
-		dashboard: dashboard,
+		store:       store,
+		lanIP:       lanIP,
+		tailscaleIP: tsIP,
+		dashboard:   dashboard,
 		transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
@@ -44,13 +48,19 @@ func NewRouter(store *config.Store, lanIP net.IP, dashboard http.Handler) *Route
 	}
 }
 
+// SetTailscaleIP sets or overrides the host's Tailscale IPv4 address for hub host routing.
+func (rt *Router) SetTailscaleIP(tsIP net.IP) {
+	rt.tailscaleIP = tsIP
+}
+
 // ServeHTTP routes incoming HTTP and WebSocket requests based on the Host header.
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	host := stripPort(r.Host)
 	domain := rt.store.Domain()
 
 	// Always allow direct access to the health check ping endpoint for 502 auto-retry polling
-	if r.URL.Path == "/__lanname_ping" {
+	// (supports /__callsign_ping and legacy /__lanname_ping alias).
+	if r.URL.Path == "/__callsign_ping" || r.URL.Path == "/__lanname_ping" {
 		rt.handleUpstreamPing(w, r, host, domain)
 		return
 	}
@@ -135,10 +145,13 @@ func (rt *Router) handleUpstreamPing(w http.ResponseWriter, r *http.Request, hos
 }
 
 func (rt *Router) isHubHost(host, domain string) bool {
-	if host == "" || host == "localhost" || host == "127.0.0.1" {
+	if host == "" || host == "localhost" || host == "127.0.0.1" || host == "::1" {
 		return true
 	}
 	if rt.lanIP != nil && host == rt.lanIP.String() {
+		return true
+	}
+	if rt.tailscaleIP != nil && host == rt.tailscaleIP.String() {
 		return true
 	}
 	if host == domain || host == domain+".local" {
@@ -213,7 +226,7 @@ func (rt *Router) renderFriendly502(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>%s is Offline — lanname</title>
+  <title>%s is Offline — Callsign</title>
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -304,7 +317,7 @@ func (rt *Router) renderFriendly502(
     const svc = %q;
     async function check() {
       try {
-        const res = await fetch('/__lanname_ping?service=' + encodeURIComponent(svc), { cache: 'no-store' });
+        const res = await fetch('/__callsign_ping?service=' + encodeURIComponent(svc), { cache: 'no-store' });
         if (res.ok) {
           document.getElementById('poll').textContent = 'Upstream online! Reloading…';
           window.location.reload();
@@ -338,7 +351,7 @@ func (rt *Router) renderUnknownServicePage(w http.ResponseWriter, r *http.Reques
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Unknown Service %s — lanname</title>
+  <title>Unknown Service %s — Callsign</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0b0f19; color: #f8fafc; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; margin: 0; }
     .card { max-width: 500px; width: 100%%; background: #111827; border: 1px solid #1f2937; border-radius: 14px; padding: 28px; }
@@ -352,7 +365,7 @@ func (rt *Router) renderUnknownServicePage(w http.ResponseWriter, r *http.Reques
   <div class="card">
     <h1>No service mapped for "%s"</h1>
     <p>Host <code>%s</code> reached this machine, but no service named <code>%s</code> is registered.</p>
-    <p>Run <code>lanname add %s=3000</code> or add it from the web hub.</p>
+    <p>Run <code>callsign add %s=3000</code> or add it from the web hub.</p>
     <a href="%s">Open %s.local Dashboard →</a>
   </div>
 </body>

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   ServiceMapping,
   authorizeAgentMcpCall,
-} from '../utils/lannameCore';
+} from '../utils/callsignCore';
 
 interface AgentHubViewProps {
   services: ServiceMapping[];

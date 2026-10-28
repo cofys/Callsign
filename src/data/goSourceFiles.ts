@@ -1,5 +1,5 @@
 import goModRaw from '../../go.mod?raw';
-import mainGoRaw from '../../cmd/lanname/main.go?raw';
+import mainGoRaw from '../../cmd/callsign/main.go?raw';
 import configGoRaw from '../../internal/config/config.go?raw';
 import netutilGoRaw from '../../internal/netutil/netutil.go?raw';
 import validatorGoRaw from '../../internal/tld/validator.go?raw';
@@ -13,7 +13,7 @@ import mcpServerGoRaw from '../../internal/mcp/server.go?raw';
 import dashboardGoRaw from '../../internal/dashboard/dashboard.go?raw';
 import androidManifestRaw from '../../android/AndroidManifest.xml?raw';
 import androidMainActivityRaw from '../../android/MainActivity.kt?raw';
-import androidVpnKtRaw from '../../android/LannameVpnService.kt?raw';
+import androidVpnKtRaw from '../../android/CallsignVpnService.kt?raw';
 import androidGradleRaw from '../../android/build.gradle.kts?raw';
 import androidWorkflowRaw from '../../.github/workflows/build-android-apk.yml?raw';
 import readmeMdRaw from '../../README.md?raw';
@@ -33,7 +33,7 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
     content: goModRaw,
   },
   {
-    path: 'cmd/lanname/main.go',
+    path: 'cmd/callsign/main.go',
     packageName: 'main',
     summary: 'CLI parser, subcommands (serve, add, rm, ls, mcp, doctor), Tailscale probe, and signal handling',
     content: mainGoRaw,
@@ -117,7 +117,7 @@ export const GO_SOURCE_FILES: GoSourceFileEntry[] = [
     content: androidMainActivityRaw,
   },
   {
-    path: 'android/LannameVpnService.kt',
+    path: 'android/CallsignVpnService.kt',
     packageName: 'companion-apk',
     summary: 'Android VpnService Split-DNS shim with Evil-Twin cryptographic identity verification and Wi-Fi NetworkCallback auto-teardown',
     content: androidVpnKtRaw,

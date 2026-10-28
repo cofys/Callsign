@@ -248,8 +248,8 @@ class MainActivity : Activity() {
             .putBoolean(KEY_ENABLED, false)
             .apply()
 
-        val stopIntent = Intent(this, LannameVpnService::class.java).apply {
-            action = LannameVpnService.ACTION_STOP
+        val stopIntent = Intent(this, CallsignVpnService::class.java).apply {
+            action = CallsignVpnService.ACTION_STOP
         }
         startService(stopIntent)
         updateUiState(false)
@@ -261,11 +261,11 @@ class MainActivity : Activity() {
             val ip = ipInput.text.toString().trim().ifEmpty { "192.168.1.159" }
             val dom = domainInput.text.toString().trim().trim('.').lowercase().ifEmpty { "x" }
 
-            val startIntent = Intent(this, LannameVpnService::class.java).apply {
-                action = LannameVpnService.ACTION_START
-                putExtra(LannameVpnService.EXTRA_DAEMON_IP, ip)
-                putExtra(LannameVpnService.EXTRA_DOMAIN, dom)
-                putExtra(LannameVpnService.EXTRA_EXPECTED_INSTANCE_ID, expectedInstanceId)
+            val startIntent = Intent(this, CallsignVpnService::class.java).apply {
+                action = CallsignVpnService.ACTION_START
+                putExtra(CallsignVpnService.EXTRA_DAEMON_IP, ip)
+                putExtra(CallsignVpnService.EXTRA_DOMAIN, dom)
+                putExtra(CallsignVpnService.EXTRA_EXPECTED_INSTANCE_ID, expectedInstanceId)
             }
             startService(startIntent)
             updateUiState(true)

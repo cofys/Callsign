@@ -46,7 +46,7 @@ func (m *Manager) Path() string {
 	return m.path
 }
 
-// Sync writes or updates the fenced # BEGIN LANNAME ... # END LANNAME block in /etc/hosts.
+// Sync writes or updates the fenced # BEGIN CALLSIGN ... # END CALLSIGN block in /etc/hosts.
 func (m *Manager) Sync(lanIP net.IP, domain string, serviceNames []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -72,7 +72,7 @@ func (m *Manager) Sync(lanIP net.IP, domain string, serviceNames []string) error
 	return nil
 }
 
-// Cleanup removes the # BEGIN LANNAME ... # END LANNAME block from /etc/hosts on shutdown.
+// Cleanup removes the # BEGIN CALLSIGN ... # END CALLSIGN block from /etc/hosts on shutdown.
 func (m *Manager) Cleanup() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

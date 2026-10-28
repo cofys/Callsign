@@ -20,6 +20,7 @@ import (
 
 const (
 	DefaultConfigPath = "callsign.yaml"
+	LegacyConfigPath  = "lanname.yaml"
 	DefaultDomain     = "x"
 	DefaultHTTPPort   = 80
 	DefaultDNSPort    = 53
@@ -103,20 +104,31 @@ func (s *Store) notify() {
 }
 
 // Load reads the YAML configuration from disk if it exists.
+// If callsign.yaml does not exist but a legacy lanname.yaml exists in the same
+// directory, Load reads lanname.yaml and saves it as callsign.yaml.
 func (s *Store) Load() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	data, err := os.ReadFile(s.path)
+	migratedFromLegacy := false
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil
+			legacyPath := filepath.Join(filepath.Dir(s.path), LegacyConfigPath)
+			if legacyData, legacyErr := os.ReadFile(legacyPath); legacyErr == nil {
+				data = legacyData
+				migratedFromLegacy = true
+			} else {
+				s.mu.Unlock()
+				return nil
+			}
+		} else {
+			s.mu.Unlock()
+			return fmt.Errorf("read config %s: %w", s.path, err)
 		}
-		return fmt.Errorf("read config %s: %w", s.path, err)
 	}
 
 	var fc FileConfig
 	if err := yaml.Unmarshal(data, &fc); err != nil {
+		s.mu.Unlock()
 		return fmt.Errorf("parse yaml %s: %w", s.path, err)
 	}
 
@@ -141,14 +153,20 @@ func (s *Store) Load() error {
 	for rawName, rawTarget := range fc.Services {
 		svc, err := ParseServicePair(rawName + "=" + rawTarget)
 		if err != nil {
+			s.mu.Unlock()
 			return fmt.Errorf("invalid service %q in %s: %w", rawName, s.path, err)
 		}
 		s.services[svc.Name] = svc
 	}
+	s.mu.Unlock()
+
+	if migratedFromLegacy {
+		_ = s.Save()
+	}
 	return nil
 }
 
-// Save atomically persists the current configuration to lanname.yaml.
+// Save atomically persists the current configuration to callsign.yaml.
 func (s *Store) Save() error {
 	s.mu.RLock()
 	fc := FileConfig{
@@ -252,7 +270,7 @@ func (s *Store) List() []Service {
 	return out
 }
 
-// InstanceID returns the unique cryptographic identifier of this lanname daemon instance.
+// InstanceID returns the unique cryptographic identifier of this Callsign daemon instance.
 func (s *Store) InstanceID() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

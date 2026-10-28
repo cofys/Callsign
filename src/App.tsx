@@ -5,7 +5,7 @@ import {
   ServicePreset,
   parseServicePair,
   createServiceMapping,
-} from './utils/lannameCore';
+} from './utils/callsignCore';
 import { QrCodeSvg } from './components/QrCodeSvg';
 import { Friendly502PreviewModal } from './components/Friendly502PreviewModal';
 import { MobileConfigModal } from './components/MobileConfigModal';

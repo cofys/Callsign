@@ -26,7 +26,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * LannameVpnService: Zero-Touch Split-DNS Companion for Stock Android (One UI / Pixel / AOSP).
+ * CallsignVpnService: Zero-Touch Split-DNS Companion for Stock Android (One UI / Pixel / AOSP).
  *
  * WHY THIS EXISTS:
  * Stock Android's netd/DnsResolver merges DHCPv4 DNS servers (the ISP gateway) and IPv6 RDNSS
@@ -52,7 +52,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *    Monitors `TRANSPORT_WIFI`. The moment the phone leaves home Wi-Fi, the VPN interface is
  *    closed in <50ms so cellular or external Wi-Fi DNS works natively without delay.
  */
-class LannameVpnService : VpnService() {
+class CallsignVpnService : VpnService() {
 
     companion object {
         private const val TAG = "CallsignVpnService"

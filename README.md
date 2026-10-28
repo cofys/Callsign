@@ -31,7 +31,7 @@ When you run apps at home—like Plex, Home Assistant, Jellyfin, Ollama, or your
 
 ```bash
 go mod tidy
-go build -o callsign ./cmd/lanname
+go build -o callsign ./cmd/callsign
 ```
 
 ### 2. Allow Port 80 & 53 Without `sudo` (Linux One-Liner)
@@ -103,7 +103,7 @@ When you run `callsign serve`, one Go binary runs four small subsystems together
 | :--- | :--- | :--- |
 | **Mac, iPhone, iPad** | Works out of the box (0 setup) | **1-Click Profile:** Open `http://x.local` on your device and tap **Download iOS/macOS Split-DNS Profile** (`.mobileconfig`). |
 | **Windows 10 / 11 & Linux** | Works out of the box (0 setup) | Automatic on the host via `/etc/hosts`, or point Wi-Fi/Router DNS to the `Callsign` IP. |
-| **Android Phones** | Chrome on stock Android ignores mDNS in the URL bar | Use the included **Callsign Android Companion APK** (`android/LannameVpnService.kt`) or set your Wi-Fi Router's Primary DNS to your `Callsign` host IP. |
+| **Android Phones** | Chrome on stock Android ignores mDNS in the URL bar | Use the included **Callsign Android Companion APK** (`android/CallsignVpnService.kt`) or set your Wi-Fi Router's Primary DNS to your `Callsign` host IP. |
 
 ---
 
@@ -154,7 +154,7 @@ AI agents (Claude Desktop, Cursor, Windsurf, Cline, LangChain, OpenAI/Gemini too
 ```
 
 - **Zero-Trust by Default:** Read-only discovery tools (`callsign_list_services`, `callsign_resolve`, `callsign_check_health`) are enabled by default for verified LAN/Tailscale peers.
-- **Scoped Bearer Token for Mutations:** Registering new routes (`callsign_register_service`) requires explicit opt-in (`--allow-agent-mutations`) and an optional `Authorization: Bearer cs_tok_...` token.
+- **Scoped Bearer Token for Mutations:** Registering or removing routes (`callsign_register_service`, `callsign_remove_service`) requires explicit opt-in (`--allow-agent-mutations`) and a valid `Authorization: Bearer cs_tok_...` token over HTTP (`/mcp`).
 
 ---
 

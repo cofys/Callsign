@@ -12,7 +12,7 @@ import (
 	"github.com/miekg/dns"
 	"golang.org/x/net/ipv4"
 
-	"github.com/lanname/lanname/internal/netutil"
+	"github.com/cofys/callsign/internal/netutil"
 )
 
 const (

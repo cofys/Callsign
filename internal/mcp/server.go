@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lanname/lanname/internal/config"
-	"github.com/lanname/lanname/internal/netutil"
+	"github.com/cofys/callsign/internal/config"
+	"github.com/cofys/callsign/internal/netutil"
 )
 
 const ProtocolVersion = "2025-03-26"
@@ -110,11 +110,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokenAuthorized := true
+	// Over HTTP (/mcp), mutation tools require BOTH --allow-agent-mutations AND a configured
+	// non-empty --agent-token matching the request's Authorization: Bearer <token> header.
+	// If no agent token is configured on the server, HTTP mutations are always refused.
+	tokenAuthorized := false
 	if s.agentToken != "" {
 		auth := strings.TrimSpace(r.Header.Get("Authorization"))
-		provided := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer"))
-		tokenAuthorized = provided == s.agentToken
+		if len(auth) >= 7 && strings.EqualFold(auth[:7], "Bearer ") {
+			provided := strings.TrimSpace(auth[7:])
+			tokenAuthorized = provided == s.agentToken
+		}
 	}
 
 	resp := s.HandleRequest(req, tokenAuthorized)
@@ -236,6 +241,20 @@ func (s *Server) toolDefinitions() []map[string]any {
 				"required": []string{"name", "target"},
 			},
 		},
+		{
+			"name":        "callsign_remove_service",
+			"description": "Removes a registered service route by name from the active Callsign daemon and configuration (requires agent mutation permission).",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Hostname prefix to remove (e.g. 'preview', 'api', 'ollama')",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
 	}
 }
 
@@ -330,6 +349,27 @@ func (s *Server) handleToolCall(req Request, tokenAuthorized bool) Response {
 			"target":    svc.TargetURL,
 			"localUrl":  fmt.Sprintf("http://%s.local", svc.Name),
 			"domainUrl": fmt.Sprintf("http://%s.%s", svc.Name, domain),
+		}, "", "  ")
+		return mcpTextResponse(req.ID, string(out), false)
+
+	case "callsign_remove_service":
+		if !s.allowMutations {
+			return mcpTextResponse(req.ID, `{"error":"Agent mutations disabled (Read-Only mode). Pass --allow-agent-mutations to enable."}`, true)
+		}
+		if !tokenAuthorized {
+			return mcpTextResponse(req.ID, `{"error":"Unauthorized: valid Authorization: Bearer <agent_token> required for mutations."}`, true)
+		}
+		name := strings.ToLower(strings.TrimSpace(callParams.Arguments["name"]))
+		if name == "" {
+			return mcpTextResponse(req.ID, `{"error":"service name is required"}`, true)
+		}
+		if !s.store.Remove(name) {
+			return mcpTextResponse(req.ID, fmt.Sprintf(`{"error":"unknown service %q"}`, name), true)
+		}
+		_ = s.store.Save()
+		out, _ := json.MarshalIndent(map[string]any{
+			"status": "removed",
+			"name":   name,
 		}, "", "  ")
 		return mcpTextResponse(req.ID, string(out), false)
 

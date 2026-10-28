@@ -3,7 +3,7 @@ import {
   validateTld,
   isTailscaleIp,
   resolveSplitHorizonIp,
-} from '../utils/lannameCore';
+} from '../utils/callsignCore';
 
 interface SetupWizardViewProps {
   domain: string;

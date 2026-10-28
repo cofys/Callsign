@@ -11,7 +11,7 @@ import {
   isPrivateLanIp,
   verifyMutationRequestOrigin,
   verifyDaemonIdentityProbe,
-} from './lannameCore';
+} from './callsignCore';
 import { buildUniversalApkBundleBytes } from './apkBundleGenerator';
 
 test('parseServicePair normalizes bare port, host:port, and full URLs', () => {
@@ -150,7 +150,7 @@ import {
   isTailscaleIp,
   resolveSplitHorizonIp,
   authorizeAgentMcpCall,
-} from './lannameCore';
+} from './callsignCore';
 
 test('Tailscale CGNAT (100.64.0.0/10) and Split-Horizon DNS answer based on source IP', () => {
   assert.equal(isTailscaleIp('100.64.0.1'), true);

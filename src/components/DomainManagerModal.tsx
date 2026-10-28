@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { validateTld, normalizeDomain } from '../utils/lannameCore';
+import { validateTld, normalizeDomain } from '../utils/callsignCore';
 
 interface DomainManagerModalProps {
   open: boolean;

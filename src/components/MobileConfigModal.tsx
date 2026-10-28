@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { generateMobileConfigXml } from '../utils/lannameCore';
+import { generateMobileConfigXml } from '../utils/callsignCore';
 
 interface MobileConfigModalProps {
   open: boolean;
