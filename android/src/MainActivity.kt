@@ -3,6 +3,7 @@ package dev.callsign.companion
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -32,6 +33,12 @@ import java.util.concurrent.TimeUnit
  * 1. Bundled Config: Reads `assets/callsign.json` if packaged by the `Callsign` daemon.
  * 2. Deep-Link QR Scan: Handles `callsign://configure?ip=192.168.1.159&domain=x&id=cs-...`
  *    so scanning the QR code on the dashboard configures and starts the service automatically.
+ * 3. Auto-Discover: Scans the Wi-Fi and adds EVERY Callsign daemon it finds.
+ *
+ * MULTI-DAEMON: households can run several daemons (one per project/box).
+ * The app keeps a list of known daemons; the fields above the list edit one
+ * daemon at a time (type an IP + its domains, Enable — or Auto-Discover and
+ * every daemon on the network is added at once).
  */
 class MainActivity : Activity() {
 
@@ -40,6 +47,7 @@ class MainActivity : Activity() {
         private const val KEY_DAEMON_IP = "daemon_ip"
         private const val KEY_DOMAIN = "domain"
         private const val KEY_INSTANCE_ID = "instance_id"
+        private const val KEY_DAEMONS = "daemons_json"
         private const val KEY_ENABLED = "vpn_enabled"
         private const val VPN_REQUEST_CODE = 1001
     }
@@ -49,42 +57,43 @@ class MainActivity : Activity() {
     private lateinit var statusLabel: TextView
     private lateinit var toggleButton: Button
     private lateinit var discoverButton: Button
+    private lateinit var daemonListLayout: LinearLayout
 
     private val scanExecutor = Executors.newCachedThreadPool()
 
     private var isVpnEnabled = false
-    private var expectedInstanceId = ""
+
+    /** All known daemons. The IP/domain fields edit one entry at a time. */
+    private val daemons = mutableListOf<DaemonEntry>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         loadBundledAssetsIfFirstRun(prefs)
-
-        var savedIp = prefs.getString(KEY_DAEMON_IP, "192.168.1.159") ?: "192.168.1.159"
-        var savedDomain = prefs.getString(KEY_DOMAIN, "x") ?: "x"
-        expectedInstanceId = prefs.getString(KEY_INSTANCE_ID, "") ?: ""
+        loadDaemons(prefs)
         isVpnEnabled = prefs.getBoolean(KEY_ENABLED, false)
 
         // Check if opened via QR code deep-link: callsign://configure?ip=192.168.1.159&domain=x
         intent?.data?.let { uri ->
             if (uri.scheme == "callsign" && uri.host == "configure") {
-                uri.getQueryParameter("ip")?.takeIf { it.isNotBlank() }?.let { savedIp = it.trim() }
-                uri.getQueryParameter("domain")?.takeIf { it.isNotBlank() }?.let {
-                    savedDomain = it.trim().trim('.').lowercase()
+                val ip = uri.getQueryParameter("ip")?.trim()?.takeIf { it.isNotBlank() }
+                if (ip != null) {
+                    val domains = uri.getQueryParameter("domain")
+                        ?.let { DaemonEntry.parseDomains(it) } ?: emptyList()
+                    val id = uri.getQueryParameter("id")?.trim() ?: ""
+                    upsertDaemon(DaemonEntry(ip, domains, id))
+                    persistDaemons(prefs)
                 }
-                uri.getQueryParameter("id")?.takeIf { it.isNotBlank() }?.let {
-                    expectedInstanceId = it.trim()
-                }
-                prefs.edit()
-                    .putString(KEY_DAEMON_IP, savedIp)
-                    .putString(KEY_DOMAIN, savedDomain)
-                    .putString(KEY_INSTANCE_ID, expectedInstanceId)
-                    .apply()
             }
         }
 
-        buildMinimalistLayout(savedIp, savedDomain)
+        val first = daemons.firstOrNull()
+        buildMinimalistLayout(
+            first?.ip ?: "192.168.1.159",
+            first?.domains?.joinToString(",") ?: "x"
+        )
+        renderDaemonList()
 
         // If launched from a QR deep-link, automatically prompt/start VPN immediately
         if (intent?.data?.scheme == "callsign") {
@@ -92,7 +101,52 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun loadBundledAssetsIfFirstRun(prefs: android.content.SharedPreferences) {
+    /** Loads the daemon list, migrating the pre-1.2 single-daemon prefs on first run. */
+    private fun loadDaemons(prefs: SharedPreferences) {
+        daemons.clear()
+        daemons.addAll(DaemonEntry.listFromJson(prefs.getString(KEY_DAEMONS, null)))
+        if (daemons.isEmpty()) {
+            val ip = prefs.getString(KEY_DAEMON_IP, null)?.trim()?.takeIf { it.isNotBlank() }
+            if (ip != null) {
+                val domains = DaemonEntry.parseDomains(prefs.getString(KEY_DOMAIN, "x") ?: "x")
+                val id = prefs.getString(KEY_INSTANCE_ID, "") ?: ""
+                daemons.add(DaemonEntry(ip, domains, id))
+                persistDaemons(prefs)
+            }
+        }
+    }
+
+    private fun persistDaemons(prefs: SharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)) {
+        val editor = prefs.edit()
+            .putString(KEY_DAEMONS, DaemonEntry.listToJson(daemons))
+        // Keep the legacy single-daemon keys pointing at the first entry so a
+        // downgrade or older reader still finds a sane configuration.
+        daemons.firstOrNull()?.let { first ->
+            editor.putString(KEY_DAEMON_IP, first.ip)
+                .putString(KEY_DOMAIN, first.domains.joinToString(","))
+                .putString(KEY_INSTANCE_ID, first.instanceId)
+        }
+        editor.apply()
+    }
+
+    /** Adds or replaces a daemon: matched by instance ID when known, else by IP. */
+    private fun upsertDaemon(entry: DaemonEntry) {
+        val idx = daemons.indexOfFirst {
+            (entry.instanceId.isNotEmpty() && it.instanceId == entry.instanceId) || it.ip == entry.ip
+        }
+        if (idx >= 0) {
+            val old = daemons[idx]
+            daemons[idx] = DaemonEntry(
+                ip = entry.ip,
+                domains = if (entry.domains.isNotEmpty()) entry.domains else old.domains,
+                instanceId = if (entry.instanceId.isNotEmpty()) entry.instanceId else old.instanceId
+            )
+        } else {
+            daemons.add(entry)
+        }
+    }
+
+    private fun loadBundledAssetsIfFirstRun(prefs: SharedPreferences) {
         if (prefs.contains(KEY_DAEMON_IP)) return
         try {
             val jsonText = assets.open("callsign.json").bufferedReader().use { it.readText() }
@@ -187,7 +241,7 @@ class MainActivity : Activity() {
                 setColor(Color.parseColor("#1E293B"))
                 cornerRadius = dp(10).toFloat()
             }
-            setOnClickListener { discoverDaemon() }
+            setOnClickListener { discoverDaemons() }
         }
         ipRow.addView(
             discoverButton,
@@ -214,6 +268,20 @@ class MainActivity : Activity() {
             typeface = Typeface.MONOSPACE
         }
         card.addView(domainInput)
+
+        // Known-daemons list: one row per daemon with a Remove button.
+        val listLabel = TextView(this).apply {
+            text = "Known Daemons"
+            setTextColor(Color.parseColor("#CBD5E1"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setPadding(0, dp(16), 0, dp(4))
+        }
+        card.addView(listLabel)
+
+        daemonListLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        card.addView(daemonListLayout)
 
         toggleButton = Button(this).apply {
             text = if (isVpnEnabled) "Turn Off" else "Enable Home DNS"
@@ -264,22 +332,76 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
-    /** "cofy, proj" / ".Cofy." -> ["cofy", "proj"] — the domain field accepts a comma list. */
-    private fun parseDomains(raw: String): List<String> =
-        raw.split(',').map { it.trim().trim('.').lowercase() }
-            .filter { it.isNotEmpty() }.distinct()
+    /** Rebuilds the known-daemons rows: "192.168.1.159 — .cofy, .proj   [Remove]". */
+    private fun renderDaemonList() {
+        if (!::daemonListLayout.isInitialized) return
+        daemonListLayout.removeAllViews()
+        if (daemons.isEmpty()) {
+            daemonListLayout.addView(TextView(this).apply {
+                text = "None yet — tap Auto-Discover, or type an IP above and Enable."
+                setTextColor(Color.parseColor("#64748B"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                setPadding(0, dp(4), 0, 0)
+            })
+            return
+        }
+        for (entry in daemons) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(4), 0, dp(4))
+            }
+            val label = TextView(this).apply {
+                val doms = entry.domains.joinToString(", ") { ".$it" }
+                text = if (doms.isEmpty()) entry.ip else "${entry.ip} — $doms"
+                setTextColor(Color.parseColor("#E2E8F0"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                typeface = Typeface.MONOSPACE
+            }
+            row.addView(label, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            val remove = Button(this).apply {
+                text = "Remove"
+                isAllCaps = false
+                setTextColor(Color.parseColor("#F87171"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#1E293B"))
+                    cornerRadius = dp(8).toFloat()
+                }
+                setOnClickListener {
+                    daemons.remove(entry)
+                    persistDaemons()
+                    renderDaemonList()
+                }
+            }
+            row.addView(remove)
+            // Tapping a row loads that daemon into the fields for editing.
+            row.setOnClickListener {
+                ipInput.setText(entry.ip)
+                domainInput.setText(entry.domains.joinToString(","))
+            }
+            daemonListLayout.addView(row)
+        }
+    }
 
     private fun enteredDomains(): String =
-        parseDomains(domainInput.text.toString()).ifEmpty { listOf("x") }.joinToString(",")
+        DaemonEntry.parseDomains(domainInput.text.toString())
+            .ifEmpty { listOf("x") }.joinToString(",")
+
+    /** The fields describe one daemon: upsert them into the list. */
+    private fun upsertFromFields() {
+        val ip = ipInput.text.toString().trim().ifEmpty { "192.168.1.159" }
+        val domains = DaemonEntry.parseDomains(enteredDomains())
+        val knownId = daemons.firstOrNull { it.ip == ip }?.instanceId ?: ""
+        upsertDaemon(DaemonEntry(ip, domains, knownId))
+    }
 
     private fun startVpnFlow() {
-        val ip = ipInput.text.toString().trim().ifEmpty { "192.168.1.159" }
-        val dom = enteredDomains()
-        domainInput.setText(dom)
-
+        upsertFromFields()
+        domainInput.setText(enteredDomains())
+        persistDaemons()
+        renderDaemonList()
         getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
-            .putString(KEY_DAEMON_IP, ip)
-            .putString(KEY_DOMAIN, dom)
             .putBoolean(KEY_ENABLED, true)
             .apply()
 
@@ -306,14 +428,15 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == VPN_REQUEST_CODE && resultCode == RESULT_OK) {
-            val ip = ipInput.text.toString().trim().ifEmpty { "192.168.1.159" }
-            val dom = enteredDomains()
-
             val startIntent = Intent(this, CallsignVpnService::class.java).apply {
                 action = CallsignVpnService.ACTION_START
-                putExtra(CallsignVpnService.EXTRA_DAEMON_IP, ip)
-                putExtra(CallsignVpnService.EXTRA_DOMAIN, dom)
-                putExtra(CallsignVpnService.EXTRA_EXPECTED_INSTANCE_ID, expectedInstanceId)
+                putExtra(CallsignVpnService.EXTRA_DAEMONS_JSON, DaemonEntry.listToJson(daemons))
+                // Legacy single-daemon extras for compatibility.
+                daemons.firstOrNull()?.let { first ->
+                    putExtra(CallsignVpnService.EXTRA_DAEMON_IP, first.ip)
+                    putExtra(CallsignVpnService.EXTRA_DOMAIN, first.domains.joinToString(","))
+                    putExtra(CallsignVpnService.EXTRA_EXPECTED_INSTANCE_ID, first.instanceId)
+                }
             }
             startService(startIntent)
             updateUiState(true)
@@ -338,12 +461,12 @@ class MainActivity : Activity() {
     private data class FoundDaemon(val ip: String, val domain: String, val instanceId: String)
 
     /**
-     * Auto-Discover: scans this Wi-Fi's /24 for a Callsign daemon by probing
+     * Auto-Discover: scans this Wi-Fi's /24 for Callsign daemons by probing
      * `GET /api/identity` on every host (the same endpoint the VPN service
-     * trusts for identity). A real daemon answers with a `cs-…` instance ID
-     * and its domain, so one tap fills in BOTH the IP and the domain fields.
+     * trusts for identity) and adds EVERY daemon it finds to the list —
+     * households running one daemon per project/box get them all in one tap.
      */
-    private fun discoverDaemon() {
+    private fun discoverDaemons() {
         discoverButton.isEnabled = false
         statusLabel.text = "◌ Scanning this Wi-Fi for Callsign…"
         statusLabel.setTextColor(Color.parseColor("#94A3B8"))
@@ -351,29 +474,34 @@ class MainActivity : Activity() {
             val found = scanForCallsign()
             runOnUiThread {
                 discoverButton.isEnabled = true
-                if (found != null) {
-                    ipInput.setText(found.ip)
-                    val merged = (parseDomains(domainInput.text.toString()) + found.domain).distinct()
-                    val mergedText = merged.joinToString(",")
-                    domainInput.setText(mergedText)
-                    expectedInstanceId = found.instanceId
-                    getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
-                        .putString(KEY_DAEMON_IP, found.ip)
-                        .putString(KEY_DOMAIN, mergedText)
-                        .putString(KEY_INSTANCE_ID, found.instanceId)
-                        .apply()
-                    statusLabel.text = "● Found Callsign at ${found.ip} (.${found.domain})"
+                if (found.isNotEmpty()) {
+                    for (hit in found) {
+                        upsertDaemon(
+                            DaemonEntry(hit.ip, DaemonEntry.parseDomains(hit.domain), hit.instanceId)
+                        )
+                    }
+                    persistDaemons()
+                    renderDaemonList()
+                    val first = found.first()
+                    ipInput.setText(first.ip)
+                    domainInput.setText(daemons.firstOrNull { it.ip == first.ip }?.domains?.joinToString(",") ?: first.domain)
+                    statusLabel.text = if (found.size == 1) {
+                        "● Found Callsign at ${first.ip} (.${first.domain})"
+                    } else {
+                        "● Found ${found.size} Callsign daemons — all added"
+                    }
                     statusLabel.setTextColor(Color.parseColor("#34D399"))
                 } else {
-                    statusLabel.text = "○ No Callsign found on this Wi-Fi — enter the IP manually"
+                    statusLabel.text = "○ No Callsign found on this Wi-Fi — enter an IP manually"
                     statusLabel.setTextColor(Color.parseColor("#F87171"))
                 }
             }
         }
     }
 
-    private fun scanForCallsign(): FoundDaemon? {
-        val prefix = wifiSubnetPrefix() ?: return null
+    /** Collects every daemon on the subnet (deduped by instance ID, then IP). */
+    private fun scanForCallsign(): List<FoundDaemon> {
+        val prefix = wifiSubnetPrefix() ?: return emptyList()
         val pool = Executors.newFixedThreadPool(32)
         return try {
             val ecs = ExecutorCompletionService<FoundDaemon?>(pool)
@@ -381,14 +509,17 @@ class MainActivity : Activity() {
                 val ip = "$prefix$host"
                 ecs.submit(Callable { probeIdentity(ip) })
             }
+            val hits = mutableListOf<FoundDaemon>()
             for (i in 1..254) {
                 val future = ecs.poll(15, TimeUnit.SECONDS) ?: break
                 val hit = try { future.get() } catch (_: Exception) { null }
-                if (hit != null) return hit
+                if (hit != null && hits.none { it.instanceId == hit.instanceId || it.ip == hit.ip }) {
+                    hits.add(hit)
+                }
             }
-            null
+            hits
         } catch (_: Exception) {
-            null
+            emptyList()
         } finally {
             pool.shutdownNow()
         }
