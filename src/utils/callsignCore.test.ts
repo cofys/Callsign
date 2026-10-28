@@ -44,9 +44,12 @@ test('validateTld classifies RED HSTS preloaded TLDs, YELLOW ICANN gTLDs, and GR
   assert.equal(yellowCom.tier, 'YELLOW');
   assert.equal(yellowCom.blocked, false);
 
-  const greenX = validateTld('x', false);
-  assert.equal(greenX.tier, 'GREEN');
-  assert.equal(greenX.blocked, false);
+  // Custom extensions (.a, .b, .c, .x, .hub, .lab, etc.) are all valid Green
+  for (const ext of ['a', 'b', 'c', 'x', 'z', 'hub', 'home', 'lan', 'lab']) {
+    const res = validateTld(ext, false);
+    assert.equal(res.tier, 'GREEN', `expected .${ext} to be GREEN`);
+    assert.equal(res.blocked, false);
+  }
 });
 
 test('simulateMdnsQuery answers A records with CacheFlush and AAAA queries with immediate NODATA', () => {

@@ -37,26 +37,44 @@ var redTLDs = map[string]string{
 }
 
 // Yellow Tier: Delegated public ICANN gTLDs/ccTLDs that risk query leakage or collision when off-network.
+// Callsign allows any custom extension (.a, .b, .c, .hub, .lab, etc.) as long as it is NOT a real public extension.
 var yellowTLDs = map[string]bool{
-	"com":   true,
-	"net":   true,
-	"org":   true,
-	"io":    true,
-	"xyz":   true,
-	"ai":    true,
-	"tech":  true,
-	"cloud": true,
-	"co":    true,
-	"me":    true,
-	"tv":    true,
-	"sh":    true,
-	"gg":    true,
-	"cc":    true,
-	"info":  true,
-	"biz":   true,
+	"com":    true,
+	"net":    true,
+	"org":    true,
+	"io":     true,
+	"xyz":    true,
+	"ai":     true,
+	"tech":   true,
+	"cloud":  true,
+	"co":     true,
+	"me":     true,
+	"tv":     true,
+	"sh":     true,
+	"gg":     true,
+	"cc":     true,
+	"info":   true,
+	"biz":    true,
+	"online": true,
+	"site":   true,
+	"store":  true,
+	"live":   true,
+	"pro":    true,
+	"top":    true,
+	"vip":    true,
+	"edu":    true,
+	"gov":    true,
+	"mil":    true,
+	"uk":     true,
+	"de":     true,
+	"ca":     true,
+	"jp":     true,
+	"fr":     true,
+	"au":     true,
 }
 
 // Validate classifies a domain suffix into Green, Yellow, or Red safety tiers.
+// Any custom extension (such as .a, .b, .c, .x, .home, .lab) is Green as long as it is NOT a real public extension.
 // If force is true, a Red tier domain is downgraded from Blocked=true so advanced users can override it.
 func Validate(domain string, force bool) ValidationResult {
 	clean := strings.ToLower(strings.Trim(strings.TrimSpace(domain), "."))
@@ -72,9 +90,9 @@ func Validate(domain string, force bool) ValidationResult {
 		return ValidationResult{
 			Domain: clean,
 			Tier:   TierRed,
-			Title:  fmt.Sprintf("Unsafe Domain Suffix (.%s)", clean),
+			Title:  fmt.Sprintf("Unsafe Real Extension (.%s)", clean),
 			Message: fmt.Sprintf(
-				"%s. Choose a safe private suffix like --domain x, --domain lan, or --domain home (or pass --force to override).",
+				"%s. Choose any non-public extension (e.g. .a, .b, .c, .x, .home, .lab) or pass --force to override.",
 				reason,
 			),
 			Blocked: !force,
@@ -85,9 +103,9 @@ func Validate(domain string, force bool) ValidationResult {
 		return ValidationResult{
 			Domain: clean,
 			Tier:   TierRed,
-			Title:  fmt.Sprintf("Unsafe Parent TLD (.%s)", lastLabel),
+			Title:  fmt.Sprintf("Unsafe Real Parent TLD (.%s)", lastLabel),
 			Message: fmt.Sprintf(
-				"%s. Choose a safe private suffix like --domain x, --domain lan, or --domain home (or pass --force to override).",
+				"%s. Choose any non-public extension (e.g. .a, .b, .c, .x, .home, .lab) or pass --force to override.",
 				reason,
 			),
 			Blocked: !force,
@@ -98,9 +116,9 @@ func Validate(domain string, force bool) ValidationResult {
 		return ValidationResult{
 			Domain: clean,
 			Tier:   TierYellow,
-			Title:  fmt.Sprintf("Public ICANN TLD Warning (.%s)", clean),
+			Title:  fmt.Sprintf("Real Public Internet Extension Warning (.%s)", clean),
 			Message: fmt.Sprintf(
-				".%s is a delegated public internet TLD. Shadowing it on your LAN can mask real internet domains and leak internal hostnames when laptops roam off-Wi-Fi. Consider an unallocated suffix like --domain x or --domain home.arpa.",
+				".%s is a real delegated public internet extension. Shadowing it on your LAN can mask real websites and leak internal queries when traveling. Choose any non-real extension instead (e.g. .a, .b, .c, .x, .home, .lab).",
 				clean,
 			),
 			Blocked: false,
@@ -110,8 +128,8 @@ func Validate(domain string, force bool) ValidationResult {
 	return ValidationResult{
 		Domain:  clean,
 		Tier:    TierGreen,
-		Title:   fmt.Sprintf("Safe Private Suffix (.%s)", clean),
-		Message: fmt.Sprintf(".%s is safe for local LAN resolution (no HSTS preload conflicts or public ICANN collisions).", clean),
+		Title:   fmt.Sprintf("Valid Custom Extension (.%s)", clean),
+		Message: fmt.Sprintf(".%s is not a real public internet extension and has no HSTS conflicts. Perfectly safe for local LAN & Tailscale resolution.", clean),
 		Blocked: false,
 	}
 }

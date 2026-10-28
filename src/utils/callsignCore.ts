@@ -139,6 +139,22 @@ const YELLOW_TLDS = new Set([
   'cc',
   'info',
   'biz',
+  'online',
+  'site',
+  'store',
+  'live',
+  'pro',
+  'top',
+  'vip',
+  'edu',
+  'gov',
+  'mil',
+  'uk',
+  'de',
+  'ca',
+  'jp',
+  'fr',
+  'au',
 ]);
 
 export function normalizeDomain(domain: string): string {
@@ -246,8 +262,8 @@ export function validateTld(domain: string, force = false): TldValidationResult 
     return {
       domain: clean,
       tier: 'RED',
-      title: `Unsafe Domain Suffix (.${clean})`,
-      message: `${RED_TLDS[clean]}. Choose a safe private suffix like --domain x, --domain lan, or --domain home (or pass --force to override).`,
+      title: `Unsafe Real Extension (.${clean})`,
+      message: `${RED_TLDS[clean]}. Choose any non-public extension (e.g. .a, .b, .c, .x, .home, .lab) or pass --force to override.`,
       blocked: !force,
     };
   }
@@ -256,8 +272,8 @@ export function validateTld(domain: string, force = false): TldValidationResult 
     return {
       domain: clean,
       tier: 'RED',
-      title: `Unsafe Parent TLD (.${lastLabel})`,
-      message: `${RED_TLDS[lastLabel]}. Choose a safe private suffix like --domain x, --domain lan, or --domain home (or pass --force to override).`,
+      title: `Unsafe Real Parent TLD (.${lastLabel})`,
+      message: `${RED_TLDS[lastLabel]}. Choose any non-public extension (e.g. .a, .b, .c, .x, .home, .lab) or pass --force to override.`,
       blocked: !force,
     };
   }
@@ -266,8 +282,8 @@ export function validateTld(domain: string, force = false): TldValidationResult 
     return {
       domain: clean,
       tier: 'YELLOW',
-      title: `Public ICANN TLD Warning (.${clean})`,
-      message: `.${clean} is a delegated public internet TLD. Shadowing it on your LAN can mask real internet domains and leak internal hostnames when laptops roam off-Wi-Fi. Consider an unallocated suffix like --domain x or --domain home.arpa.`,
+      title: `Real Public Internet Extension Warning (.${clean})`,
+      message: `.${clean} is a real delegated public internet extension. Shadowing it on your LAN can mask real websites and leak internal queries when traveling. Choose any non-real extension instead (e.g. .a, .b, .c, .x, .home, .lab).`,
       blocked: false,
     };
   }
@@ -275,8 +291,8 @@ export function validateTld(domain: string, force = false): TldValidationResult 
   return {
     domain: clean,
     tier: 'GREEN',
-    title: `Safe Private Suffix (.${clean})`,
-    message: `.${clean} is safe for local LAN resolution (no HSTS preload conflicts or public ICANN collisions).`,
+    title: `Valid Custom Extension (.${clean})`,
+    message: `.${clean} is not a real public internet extension and has no HSTS conflicts. Perfectly safe for local LAN & Tailscale resolution.`,
     blocked: false,
   };
 }

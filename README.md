@@ -27,17 +27,17 @@ Every home app or dev server runs on an annoying IP and port (`http://192.168.1.
 **Callsign is a single, zero-dependency Go binary** that handles naming and port forwarding simultaneously:
 
 - **Instant `.local` URLs** across macOS, iOS, Windows, and Linux via RFC 6762 mDNS (`http://plex.local`).
-- **Custom domains** like `http://plex.x`, `http://ha.home`, or `http://lab.lan` via authoritative local DNS.
+- **Any Custom Extension You Want**: `.a`, `.b`, `.c`, `.x`, `.hub`, `.lab`, `.home` — any extension is valid as long as it is **NOT a real public internet extension**.
 - **Port-Free HTTP/WebSocket Reverse Proxy**: eliminates `:32400` and `:8123`; auto-reloads with zero downtime.
 - **Tailscale Split-Horizon DNS**: queries from your home Wi-Fi get Gigabit LAN speeds; queries over Tailscale get your secure CGNAT IP (`100.x.y.z`).
 - **Built-in Model Context Protocol (MCP)**: AI agents (Claude Desktop, Cursor, LangChain) can discover, resolve, and register routes autonomously.
 
 ```bash
-# Start Callsign with your services in one line
-callsign serve plex=32400 ha=8123 nas=192.168.1.50:8080 --domain x
+# Start Callsign with single-letter ultra-short domain (.a, .b, .c, .x, etc.)
+callsign serve plex=32400 ha=8123 nas=192.168.1.50:8080 --domain a
 ```
 
-Open **`http://x.local`** (or **`http://plex.local`**) in your browser. Done.
+Open **`http://a.local`** (or **`http://plex.a`**) in your browser. Done.
 
 ---
 
@@ -57,8 +57,18 @@ callsign ls
 callsign rm cameras
 
 # Run a safety & port diagnosis
-callsign doctor --domain x
+callsign doctor --domain a
 ```
+
+---
+
+## 🏷️ Create Any Custom Extension (`.a`, `.b`, `.c`, etc.)
+
+You are **not locked into preset extensions**. Callsign gives you the freedom to choose any domain ending:
+- **Ultra-fast 1-letter extensions**: `.a`, `.b`, `.c`, `.x`, `.z` — lightning quick to type on phones (`http://plex.a`, `http://ha.b`, `http://ollama.c`).
+- **Custom words & abbreviations**: `.hub`, `.lab`, `.home`, `.lan`, `.box`, `.homelab`, `.base`.
+
+> **The Only Rule:** As long as it is **NOT a real public internet extension** (like `.com`, `.net`, or HSTS-locked `.dev`), it works out of the box with zero router configuration. Callsign automatically validates your suffix so you never collide with real web traffic.
 
 ---
 
@@ -249,9 +259,9 @@ Now, opening `http://plex.x` or `http://ollama.x` works seamlessly from your pho
 ## ❓ FAQ
 
 <details>
-<summary><b>Can I change the .x domain to something else?</b></summary>
+<summary><b>Can I create my own extension like .a, .b, or .c?</b></summary>
 
-Yes! Pass `--domain <suffix>` (e.g. `--domain home`, `--domain lan`, or `--domain lab`). Every configured service is reachable simultaneously at `<name>.local` and `<name>.<domain>`.
+Yes! You are not restricted to presets. You can choose **any custom extension** you want — ultra-short single letters (`.a`, `.b`, `.c`, `.x`, `.z`), abbreviations, or words (`.hub`, `.lab`, `.home`, `.lan`). The only rule: it must **not be a real public internet extension** (like `.com` or `.dev`). Pass `--domain <suffix>` on start or change it directly in the web UI.
 </details>
 
 <details>

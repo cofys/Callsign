@@ -18,10 +18,12 @@ interface SetupWizardViewProps {
 }
 
 const QUICK_DOMAINS = [
-  { id: 'x', label: '.x', desc: 'Ultra-short 1-letter custom ending' },
-  { id: 'home', label: '.home', desc: 'Great for family & smart home' },
-  { id: 'lan', label: '.lan', desc: 'Classic local network ending' },
-  { id: 'box', label: '.box', desc: 'Simple & easy to type' },
+  { id: 'a', label: '.a', desc: '1-letter lightning fast' },
+  { id: 'b', label: '.b', desc: 'Ultra-short 1-letter' },
+  { id: 'c', label: '.c', desc: 'Minimalist 1-letter' },
+  { id: 'x', label: '.x', desc: 'Clean default custom' },
+  { id: 'hub', label: '.hub', desc: 'Central smart home & dev' },
+  { id: 'lab', label: '.lab', desc: 'Homelab & self-hosting' },
 ];
 
 export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
@@ -88,11 +90,11 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
-      {/* Section 1: Pick Your Custom Ending */}
+      {/* Section 1: Pick Any Custom Extension */}
       <section className="rounded-2xl border border-slate-800 bg-[#111827] p-6 sm:p-8">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-white">
-            01. Pick Your Custom Ending
+            01. Create Any Custom Extension You Want
           </h2>
           {savedNotice && (
             <span className="text-xs font-medium text-emerald-400">
@@ -102,11 +104,21 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
         </div>
         <p className="mt-1 text-sm text-slate-400">
           Every app automatically works at <code className="text-slate-200">.local</code> (like{' '}
-          <code className="text-sky-400">http://app.local</code>). Pick a custom ending if you also want{' '}
-          <code className="text-sky-400">http://app.{domain}</code> across Wi-Fi and Tailscale.
+          <code className="text-sky-400">http://app.local</code>). Callsign lets you invent <strong className="text-white">any custom extension</strong> you want (<code className="text-sky-400">.a</code>, <code className="text-sky-400">.b</code>, <code className="text-sky-400">.c</code>, <code className="text-sky-400">.x</code>, <code className="text-sky-400">.hub</code>, etc.).
         </p>
 
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {/* Feature Highlight Callout */}
+        <div className="mt-4 rounded-xl border border-sky-500/20 bg-sky-500/5 p-3.5 text-xs text-sky-200">
+          <div className="flex items-center gap-2 font-semibold text-sky-300">
+            <span>✨ Infinite Custom Extensions</span>
+            <span className="rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] text-sky-200">Not limited to presets</span>
+          </div>
+          <p className="mt-1 text-slate-300">
+            You are not locked into any fixed list. Single-letter suffixes (<code className="text-white font-mono">.a</code>, <code className="text-white font-mono">.b</code>, <code className="text-white font-mono">.c</code>, <code className="text-white font-mono">.x</code>) and custom names work right away. As long as it is <strong className="text-white">NOT a real public extension</strong> (like <code className="text-amber-300 font-mono">.com</code> or <code className="text-amber-300 font-mono">.dev</code>), it resolves seamlessly across your LAN and Tailscale mesh.
+          </p>
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
           {QUICK_DOMAINS.map((item) => {
             const active = domain === item.id;
             return (
@@ -114,7 +126,7 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
                 key={item.id}
                 type="button"
                 onClick={() => handleApplyDomain(item.id)}
-                className={`rounded-xl border p-3.5 text-left transition-colors ${
+                className={`rounded-xl border p-3 text-left transition-colors ${
                   active
                     ? 'border-sky-500 bg-sky-500/10 text-white'
                     : 'border-slate-800 bg-[#0b0f19] text-slate-300 hover:border-slate-700'
@@ -123,7 +135,7 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
                 <div className="font-mono text-sm font-bold text-white">
                   {item.label}
                 </div>
-                <div className="mt-1 text-xs text-slate-400">{item.desc}</div>
+                <div className="mt-0.5 text-[11px] text-slate-400 truncate">{item.desc}</div>
               </button>
             );
           })}
@@ -144,7 +156,7 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
               type="text"
               value={customInput}
               onChange={(e) => setCustomInput(e.target.value)}
-              placeholder="Or type your own (e.g. x, home, lab)"
+              placeholder="Type any custom extension (e.g. a, b, c, z, hub, lab, mybox)"
               aria-label="Custom domain ending"
               className="w-full rounded-xl border border-slate-800 bg-[#0b0f19] py-2.5 pl-7 pr-3.5 font-mono text-sm text-white placeholder:font-sans placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
             />
@@ -158,13 +170,17 @@ export const SetupWizardView: React.FC<SetupWizardViewProps> = ({
           </button>
         </form>
 
-        {validation.tier !== 'GREEN' && (
+        {validation.tier !== 'GREEN' ? (
           <p
             className={`mt-2.5 text-xs ${
               validation.tier === 'RED' ? 'text-red-400' : 'text-amber-300'
             }`}
           >
             {validation.message}
+          </p>
+        ) : (
+          <p className="mt-2 text-xs text-emerald-400">
+            ✓ .{cleanCandidate || domain} is a valid custom non-public extension. Safe for immediate use!
           </p>
         )}
       </section>

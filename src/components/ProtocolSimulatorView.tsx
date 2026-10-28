@@ -391,11 +391,11 @@ export const ProtocolSimulatorView: React.FC<ProtocolSimulatorViewProps> = ({
               02. TLD Safety Classifier (internal/tld)
             </h2>
             <p className="mt-1 text-sm text-slate-400">
-              Validates <code className="text-slate-200">--domain</code> against HSTS-preloaded browser lists and public ICANN gTLDs.
+              Any custom extension (<code className="text-sky-300">.a</code>, <code className="text-sky-300">.b</code>, <code className="text-sky-300">.c</code>, <code className="text-sky-300">.x</code>, <code className="text-slate-300">.hub</code>) works as long as it is <strong>NOT a real public extension</strong>. Real public extensions (<code className="text-amber-300">.com</code>) or HSTS TLDs (<code className="text-red-400">.dev</code>) trigger warnings or blocks.
             </p>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              {['x', 'home.arpa', 'dev', 'app', 'localhost', 'com', 'io'].map(
+              {['a', 'b', 'c', 'x', 'hub', 'home.arpa', 'dev', 'app', 'localhost', 'com', 'io'].map(
                 (sample) => (
                   <button
                     key={sample}

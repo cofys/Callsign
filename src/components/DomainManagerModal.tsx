@@ -9,12 +9,14 @@ interface DomainManagerModalProps {
 }
 
 const PRESET_DOMAINS = [
-  { domain: 'x', label: '.x', desc: 'Ultra-short 1-letter custom suffix' },
-  { domain: 'home', label: '.home', desc: 'Standard private home network suffix' },
-  { domain: 'lan', label: '.lan', desc: 'Universal Local Area Network suffix' },
-  { domain: 'lab', label: '.lab', desc: 'Homelab & self-hosting server domain' },
-  { domain: 'box', label: '.box', desc: 'Short, clean personal box suffix' },
-  { domain: 'home.arpa', label: '.home.arpa', desc: 'Official IETF RFC 8375 non-delegated home domain' },
+  { domain: 'a', label: '.a', desc: '1-letter lightning fast custom suffix' },
+  { domain: 'b', label: '.b', desc: 'Ultra-short 1-letter suffix' },
+  { domain: 'c', label: '.c', desc: 'Minimalist 1-letter suffix' },
+  { domain: 'x', label: '.x', desc: 'Clean default custom suffix' },
+  { domain: 'home', label: '.home', desc: 'Private home network suffix' },
+  { domain: 'lab', label: '.lab', desc: 'Homelab & self-hosting domain' },
+  { domain: 'lan', label: '.lan', desc: 'Universal Local Area Network' },
+  { domain: 'hub', label: '.hub', desc: 'Central smart home & dev hub' },
 ];
 
 export const DomainManagerModal: React.FC<DomainManagerModalProps> = ({
@@ -48,10 +50,10 @@ export const DomainManagerModal: React.FC<DomainManagerModalProps> = ({
         <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-4">
           <div>
             <h3 id="domain-manager-title" className="text-lg font-bold text-slate-100">
-              Customize Your Local Domain Suffix
+              Create Any Custom Extension
             </h3>
             <p className="mt-1 text-xs text-slate-400">
-              Change the default suffix from <code className="text-sky-400">.{currentDomain}</code> to any custom name you prefer (e.g. <code className="text-slate-200">.home</code>, <code className="text-slate-200">.lab</code>, or your family name).
+              You are free to use <strong className="text-white">any extension you want</strong> (<code className="text-sky-400">.a</code>, <code className="text-sky-400">.b</code>, <code className="text-sky-400">.c</code>, <code className="text-sky-400">.x</code>, <code className="text-slate-200">.hub</code>, etc.). As long as it is <strong className="text-amber-300">NOT a real public internet extension</strong> (like <code className="text-slate-300">.com</code> or <code className="text-slate-300">.dev</code>), it works instantly.
             </p>
           </div>
           <button
@@ -66,9 +68,9 @@ export const DomainManagerModal: React.FC<DomainManagerModalProps> = ({
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-2">
-              Popular Safe Home Network Domains
+              Popular Custom Extension Ideas (Single letters &amp; words)
             </label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {PRESET_DOMAINS.map((item) => (
                 <button
                   key={item.domain}
@@ -81,7 +83,7 @@ export const DomainManagerModal: React.FC<DomainManagerModalProps> = ({
                   }`}
                 >
                   <div className="font-mono text-xs font-bold">{item.label}</div>
-                  <div className="mt-0.5 text-[11px] text-slate-400 truncate">{item.desc}</div>
+                  <div className="mt-0.5 text-[10px] text-slate-400 truncate">{item.desc}</div>
                 </button>
               ))}
             </div>
@@ -89,7 +91,7 @@ export const DomainManagerModal: React.FC<DomainManagerModalProps> = ({
 
           <div>
             <label htmlFor="custom-domain-field" className="block text-xs font-medium text-slate-300 mb-1.5">
-              Custom Domain Suffix (Type anything you like)
+              Type Any Extension You Want (Single letters: a, b, c, z, or custom words)
             </label>
             <div className="flex items-center gap-2">
               <span className="font-mono text-sm text-slate-400">.</span>
@@ -99,7 +101,7 @@ export const DomainManagerModal: React.FC<DomainManagerModalProps> = ({
                 required
                 value={domainInput}
                 onChange={(e) => setDomainInput(e.target.value)}
-                placeholder="home, lab, smith, etc."
+                placeholder="a, b, c, x, hub, lab, myhomelab..."
                 className="w-full rounded-lg border border-slate-700 bg-[#0b0f19] px-3.5 py-2 font-mono text-sm text-slate-100 focus:border-sky-400 focus:outline-none"
               />
             </div>
