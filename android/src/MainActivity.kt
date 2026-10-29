@@ -557,7 +557,7 @@ class MainActivity : Activity() {
                 for (addr in Collections.list(iface.inetAddresses)) {
                     if (addr !is Inet4Address || addr.isLoopbackAddress) continue
                     val ip = addr.hostAddress ?: continue
-                    if (ip == "10.254.254.1") continue // our own VPN anchor address
+                    if (ip.startsWith("10.254.254.")) continue // our own VPN anchor/interface
                     val isPrivate = ip.startsWith("192.168.") || ip.startsWith("10.") ||
                         ip.matches(Regex("^172\\.(1[6-9]|2\\d|3[01])\\..*"))
                     if (isPrivate) {

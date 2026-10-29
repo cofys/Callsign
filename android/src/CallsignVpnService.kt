@@ -77,7 +77,16 @@ class CallsignVpnService : VpnService() {
         const val EXTRA_DOMAIN = "extra_domain"
         const val EXTRA_EXPECTED_INSTANCE_ID = "extra_expected_instance_id"
 
+        /** DNS anchor: the address the system resolver sends queries to.
+         *  It must NOT be the TUN interface's own address — packets to a local
+         *  address are delivered by the local stack (where nothing listens)
+         *  instead of entering the TUN. The anchor is only *routed* via the
+         *  TUN (/32), so queries land on the router's fd as intended.
+         *  (v1.2.0 set anchor == interface address and killed all DNS.) */
         private const val VIRTUAL_TUN_IPV4 = "10.254.254.1"
+
+        /** The TUN interface's own address — deliberately different from the anchor. */
+        private const val TUN_INTERFACE_IPV4 = "10.254.254.2"
         private const val VERIFY_TIMEOUT_MS = 600
         private const val FORWARD_TIMEOUT_MS = 1200
     }
@@ -351,8 +360,10 @@ class CallsignVpnService : VpnService() {
             val builder = Builder()
                 .setSession("Callsign ($domainLabel & .local)")
                 .setMtu(1500)
-                // Assign a local non-conflicting /32 interface address
-                .addAddress(VIRTUAL_TUN_IPV4, 32)
+                // Interface address (.2) is deliberately NOT the DNS anchor (.1):
+                // only the anchor is routed into the TUN so resolver queries to
+                // it arrive on the router fd instead of dying in the local stack.
+                .addAddress(TUN_INTERFACE_IPV4, 32)
                 // Point the resolver at the tunnel anchor ITSELF: the DNS router
                 // below reads each query and forwards it to the owning daemon.
                 // (Listing several daemons here would not work — the resolver
@@ -404,6 +415,7 @@ class CallsignVpnService : VpnService() {
         val input = FileInputStream(pfd.fileDescriptor)
         val output = FileOutputStream(pfd.fileDescriptor)
         routerRunning.set(true)
+        Log.i(TAG, "DNS router started (anchor $VIRTUAL_TUN_IPV4, interface $TUN_INTERFACE_IPV4)")
         routerThread = Thread {
             val buffer = ByteArray(32767)
             while (routerRunning.get()) {
@@ -448,7 +460,9 @@ class CallsignVpnService : VpnService() {
         if (payloadEnd <= ihl + 8) return
         val query = packet.copyOfRange(ihl + 8, payloadEnd)
 
-        val response = routeQuery(query) ?: return
+        // Fast SERVFAIL beats silence: if no daemon answers, the resolver gets
+        // an immediate error instead of hanging every lookup on timeouts.
+        val response = routeQuery(query) ?: buildServfail(query) ?: return
         val reply = buildUdpReply(packet, srcIp, srcPort, response)
         synchronized(output) {
             output.write(reply)
@@ -489,6 +503,37 @@ class CallsignVpnService : VpnService() {
             lastNxDomain = resp
         }
         return lastNxDomain
+    }
+
+    /** Builds a SERVFAIL response (header + question only) for [query]. */
+    private fun buildServfail(query: ByteArray): ByteArray? {
+        return try {
+            if (query.size < 12) return null
+            // Find the end of the question section: qname labels + root + QTYPE/QCLASS.
+            var offset = 12
+            while (offset < query.size) {
+                val len = query[offset].toInt() and 0xFF
+                if (len == 0) {
+                    offset += 1
+                    break
+                }
+                if (len > 63) return null
+                offset += 1 + len
+            }
+            val questionEnd = offset + 4
+            if (questionEnd > query.size) return null
+            val out = query.copyOf(questionEnd)
+            // Flags: QR=1, keep RD, RA=1, RCODE=2 (SERVFAIL). Counts: QD=1, others 0.
+            out[2] = (0x80 or (query[2].toInt() and 0x01)).toByte()
+            out[3] = (0x80 or 0x02).toByte()
+            out[4] = 0; out[5] = 1
+            out[6] = 0; out[7] = 0
+            out[8] = 0; out[9] = 0
+            out[10] = 0; out[11] = 0
+            out
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun forwardDnsUdp(wifiNetwork: Network, daemonIp: String, query: ByteArray): ByteArray? {
