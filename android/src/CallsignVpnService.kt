@@ -114,6 +114,50 @@ class CallsignVpnService : VpnService() {
     @Volatile
     private var routerThread: Thread? = null
 
+    // ---- On-device diagnostics (v1.2.2): counters + last error are written
+    // to SharedPreferences so the Activity can SHOW them — a phone-side
+    // bisect (arrival vs forward vs write-back) without needing adb.
+    private val dbgPacketsRaw = java.util.concurrent.atomic.AtomicInteger(0)
+    private val dbgPacketsDns = java.util.concurrent.atomic.AtomicInteger(0)
+    private val dbgForwardOk = java.util.concurrent.atomic.AtomicInteger(0)
+    private val dbgForwardFail = java.util.concurrent.atomic.AtomicInteger(0)
+
+    private fun dbgWrite(block: android.content.SharedPreferences.Editor.() -> Unit) {
+        try {
+            val prefs = getSharedPreferences("callsign_prefs", Context.MODE_PRIVATE)
+            prefs.edit().apply(block).apply()
+        } catch (_: Exception) {
+            // Diagnostics must never break the service.
+        }
+    }
+
+    private fun dbgReset() {
+        dbgPacketsRaw.set(0)
+        dbgPacketsDns.set(0)
+        dbgForwardOk.set(0)
+        dbgForwardFail.set(0)
+        dbgWrite {
+            putString("dbg_state", "starting")
+            putInt("dbg_packets_raw", 0)
+            putInt("dbg_packets_dns", 0)
+            putInt("dbg_fwd_ok", 0)
+            putInt("dbg_fwd_fail", 0)
+            putString("dbg_last_error", "")
+        }
+    }
+
+    /** Persists a counter at 1,2,5,10,25,50,100, then every +100 — enough to bisect, cheap to write. */
+    private fun dbgBump(counter: java.util.concurrent.atomic.AtomicInteger, key: String) {
+        val n = counter.incrementAndGet()
+        if (n <= 2 || n == 5 || n == 10 || n == 25 || n == 50 || n == 100 || n % 100 == 0) {
+            dbgWrite { putInt(key, n) }
+        }
+    }
+
+    private fun dbgError(where: String, e: Exception) {
+        dbgWrite { putString("dbg_last_error", "$where: ${e.javaClass.simpleName}: ${e.message}") }
+    }
+
     private lateinit var connectivityManager: ConnectivityManager
     private var wifiCallbackRegistered = false
 
@@ -160,6 +204,7 @@ class CallsignVpnService : VpnService() {
                         configuredDaemons = listOf(DaemonEntry(ip, domains, id))
                     }
                 }
+                dbgReset()
                 startCompanion()
                 return START_STICKY
             }
@@ -223,6 +268,7 @@ class CallsignVpnService : VpnService() {
                     TAG,
                     "No configured daemon matched a Callsign identity on this Wi-Fi; keeping VPN dormant."
                 )
+                dbgWrite { putString("dbg_state", "no daemon verified") }
                 teardownTunnel()
             } else {
                 establishSplitDnsTunnel(wifiNetwork, verified)
@@ -388,6 +434,7 @@ class CallsignVpnService : VpnService() {
             val pfd = builder.establish()
             vpnInterface = pfd
             isRunning.set(pfd != null)
+            dbgWrite { putString("dbg_state", if (pfd != null) "tunnel up" else "establish returned null") }
             if (pfd == null) return
 
             activeDaemons = verified
@@ -416,6 +463,7 @@ class CallsignVpnService : VpnService() {
         val output = FileOutputStream(pfd.fileDescriptor)
         routerRunning.set(true)
         Log.i(TAG, "DNS router started (anchor $VIRTUAL_TUN_IPV4, interface $TUN_INTERFACE_IPV4)")
+        dbgWrite { putString("dbg_state", "router up") }
         routerThread = Thread {
             val buffer = ByteArray(32767)
             while (routerRunning.get()) {
@@ -425,6 +473,7 @@ class CallsignVpnService : VpnService() {
                     break // fd closed by teardown
                 }
                 if (n <= 0) break
+                dbgBump(dbgPacketsRaw, "dbg_packets_raw")
                 val packet = buffer.copyOf(n)
                 queryExecutor.execute {
                     try {
@@ -458,6 +507,7 @@ class CallsignVpnService : VpnService() {
         val udpLen = u16(packet, ihl + 4)
         val payloadEnd = if (udpLen >= 8) minOf(packet.size, ihl + udpLen) else packet.size
         if (payloadEnd <= ihl + 8) return
+        dbgBump(dbgPacketsDns, "dbg_packets_dns")
         val query = packet.copyOfRange(ihl + 8, payloadEnd)
 
         // Fast SERVFAIL beats silence: if no daemon answers, the resolver gets
@@ -499,8 +549,16 @@ class CallsignVpnService : VpnService() {
         for (candidate in candidates) {
             val resp = forwardDnsUdp(wifi, candidate.ip, query) ?: continue
             val rcode = if (resp.size >= 4) resp[3].toInt() and 0x0F else 0
-            if (rcode != 3) return resp
+            if (rcode != 3) {
+                dbgBump(dbgForwardOk, "dbg_fwd_ok")
+                return resp
+            }
             lastNxDomain = resp
+        }
+        if (lastNxDomain != null) {
+            dbgBump(dbgForwardOk, "dbg_fwd_ok")
+        } else {
+            dbgBump(dbgForwardFail, "dbg_fwd_fail")
         }
         return lastNxDomain
     }
@@ -539,9 +597,19 @@ class CallsignVpnService : VpnService() {
     private fun forwardDnsUdp(wifiNetwork: Network, daemonIp: String, query: ByteArray): ByteArray? {
         var socket: DatagramSocket? = null
         return try {
-            socket = DatagramSocket()
+            // Unbound socket: Network.bindSocket() can throw on an already-bound
+            // DatagramSocket (DatagramSocket() binds an ephemeral port eagerly).
+            // The router's first builds used the eager form — a prime suspect
+            // for forwards that never left the phone.
+            socket = DatagramSocket(null as java.net.SocketAddress?)
             protect(socket)
-            wifiNetwork.bindSocket(socket)
+            try {
+                wifiNetwork.bindSocket(socket)
+            } catch (e: Exception) {
+                // Not fatal: protect() alone keeps the packet off the TUN (the
+                // TUN only routes the /32 anchor anyway, LAN traffic can't loop).
+                dbgError("bindSocket(fell back to protect-only)", e)
+            }
             socket.soTimeout = FORWARD_TIMEOUT_MS
             val target = InetAddress.getByName(daemonIp)
             socket.send(DatagramPacket(query, query.size, target, 53))
@@ -550,6 +618,7 @@ class CallsignVpnService : VpnService() {
             socket.receive(resp)
             buf.copyOf(resp.length)
         } catch (e: Exception) {
+            dbgError("forwardDnsUdp->$daemonIp", e)
             null
         } finally {
             socket?.close()
@@ -632,6 +701,7 @@ class CallsignVpnService : VpnService() {
     }
 
     private fun teardownTunnelLocked() {
+        dbgWrite { putString("dbg_state", "down") }
         routerRunning.set(false)
         isRunning.set(false)
         activeDaemons = emptyList()

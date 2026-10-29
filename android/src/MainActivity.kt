@@ -58,6 +58,7 @@ class MainActivity : Activity() {
     private lateinit var toggleButton: Button
     private lateinit var discoverButton: Button
     private lateinit var daemonListLayout: LinearLayout
+    private lateinit var debugLabel: TextView
 
     private val scanExecutor = Executors.newCachedThreadPool()
 
@@ -329,11 +330,43 @@ class MainActivity : Activity() {
         }
         root.addView(safetyNote)
 
+        debugLabel = TextView(this).apply {
+            text = ""
+            setTextColor(Color.parseColor("#475569"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            typeface = Typeface.MONOSPACE
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(14), dp(12), 0)
+            // Tap to refresh the readout after toggling / browsing.
+            setOnClickListener { refreshDebugLabel() }
+        }
+        root.addView(debugLabel)
+
         setContentView(root)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshDebugLabel()
+    }
+
+    /** Shows the VPN service's on-device counters: state / packets seen / forwarded / failed / last error. */
+    private fun refreshDebugLabel() {
+        if (!::debugLabel.isInitialized) return
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val state = prefs.getString("dbg_state", "—") ?: "—"
+        val raw = prefs.getInt("dbg_packets_raw", 0)
+        val dns = prefs.getInt("dbg_packets_dns", 0)
+        val ok = prefs.getInt("dbg_fwd_ok", 0)
+        val fail = prefs.getInt("dbg_fwd_fail", 0)
+        val err = prefs.getString("dbg_last_error", "") ?: ""
+        debugLabel.text = "router: $state · pkts $raw · dns $dns · fwd ✓$ok ✗$fail" +
+            if (err.isNotEmpty()) "\nlast error: $err" else ""
     }
 
     /** Rebuilds the known-daemons rows: "192.168.1.159 — .cofy, .proj   [Remove]". */
     private fun renderDaemonList() {
+        refreshDebugLabel()
         if (!::daemonListLayout.isInitialized) return
         daemonListLayout.removeAllViews()
         if (daemons.isEmpty()) {
