@@ -35,6 +35,15 @@ type Service struct {
 	HostPort  string `yaml:"-" json:"hostPort"`
 }
 
+// PeerConfig is a statically configured sibling Callsign daemon: another
+// instance on the LAN that owns a different custom domain. Peers are also
+// discovered automatically at runtime; static entries cover peers that
+// live outside the scanned subnet or on non-standard HTTP ports' networks.
+type PeerConfig struct {
+	IP     string `yaml:"ip" json:"ip"`
+	Domain string `yaml:"domain" json:"domain"`
+}
+
 // FileConfig is the on-disk YAML representation of callsign.yaml.
 type FileConfig struct {
 	InstanceID string            `yaml:"instance_id,omitempty" json:"instance_id,omitempty"`
@@ -44,6 +53,7 @@ type FileConfig struct {
 	NoDNS      bool              `yaml:"no_dns,omitempty" json:"no_dns,omitempty"`
 	NoHosts    bool              `yaml:"no_hosts,omitempty" json:"no_hosts,omitempty"`
 	Upstreams  []string          `yaml:"upstreams,omitempty" json:"upstreams,omitempty"`
+	Peers      []PeerConfig      `yaml:"peers,omitempty" json:"peers,omitempty"`
 	Services   map[string]string `yaml:"services" json:"services"`
 }
 
@@ -58,6 +68,7 @@ type Store struct {
 	noDNS      bool
 	noHosts    bool
 	upstreams  []string
+	peers      []PeerConfig
 	services   map[string]Service
 	onChange   []func()
 }
@@ -138,6 +149,13 @@ func (s *Store) Load() error {
 	if len(fc.Upstreams) > 0 {
 		s.upstreams = fc.Upstreams
 	}
+	for _, p := range fc.Peers {
+		ip := strings.TrimSpace(p.IP)
+		dom := NormalizeDomain(p.Domain)
+		if ip != "" && dom != "" {
+			s.peers = append(s.peers, PeerConfig{IP: ip, Domain: dom})
+		}
+	}
 
 	for rawName, rawTarget := range fc.Services {
 		svc, err := ParseServicePair(rawName + "=" + rawTarget)
@@ -162,6 +180,7 @@ func (s *Store) Save() error {
 		NoDNS:      s.noDNS,
 		NoHosts:    s.noHosts,
 		Upstreams:  append([]string{}, s.upstreams...),
+		Peers:      append([]PeerConfig{}, s.peers...),
 		Services:   make(map[string]string, len(s.services)),
 	}
 	for k, v := range s.services {
@@ -302,6 +321,13 @@ func (s *Store) Upstreams() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]string{}, s.upstreams...)
+}
+
+// Peers returns the statically configured sibling daemons.
+func (s *Store) Peers() []PeerConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]PeerConfig{}, s.peers...)
 }
 
 // Path returns the file path of the configuration file.

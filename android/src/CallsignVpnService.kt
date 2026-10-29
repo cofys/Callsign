@@ -15,8 +15,6 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
-import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -30,21 +28,18 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * CallsignVpnService: Zero-Touch Split-DNS Companion for Stock Android (One UI / Pixel / AOSP).
  *
- * WHY THIS EXISTS:
- * Stock Android's netd/DnsResolver merges DHCPv4 DNS servers (the ISP gateway) and IPv6 RDNSS
- * servers onto the same interface, and treats an NXDOMAIN response from the primary DHCPv4
- * server as authoritative and final (never failing over to secondary DNS servers). Furthermore,
- * Android Chrome and Bionic bypass mDNS for arbitrary *.local hostnames in the browser URL bar.
+ * TRANSPORT (v1.3): the system resolver is pointed at the verified daemons'
+ * real LAN IPs, reached over the underlying Wi-Fi — the shape that has
+ * worked on-device since v1.0. Multi-daemon name routing does NOT happen
+ * here: sibling Callsign daemons discover each other and forward queries
+ * for each other's domains (and for each other's `.local` services), so
+ * whichever daemon the resolver asks first can answer every name.
  *
- * MULTI-DAEMON ROUTING:
- * Android gives a VPN exactly one flat list of DNS servers and the resolver will not fail over
- * on NXDOMAIN — so pointing the system resolver at several daemons cannot route per-domain
- * (the first daemon NXDOMAINs the second daemon's zones via its upstream, fatally). Instead the
- * resolver is pointed at the tunnel anchor itself (10.254.254.1) and a tiny DNS router inside
- * this service reads each query off the TUN fd and forwards it to the daemon that owns the
- * queried domain, falling through to the next daemon only on NXDOMAIN (e.g. for `.local`,
- * which every daemon serves for its own services). Only DNS packets to the anchor ever enter
- * the TUN — all other traffic keeps bypassing it entirely.
+ * (History: v1.2 tried routing DNS inside the tunnel via a fake anchor IP.
+ * On real hardware the resolver's queries to an in-tunnel address never
+ * arrived as packets — pkts 2 / dns 0 on the device counters — while
+ * apps with their own resolvers kept working, which made the failure look
+ * browser-only. That design is removed; do not resurrect it.)
  *
  * SECURITY ARCHITECTURE (3 Hardened Guards):
  * 1. Cryptographic Daemon Identity Verification (Anti-Evil-Twin / Subnet Collision Guard):
@@ -77,24 +72,12 @@ class CallsignVpnService : VpnService() {
         const val EXTRA_DOMAIN = "extra_domain"
         const val EXTRA_EXPECTED_INSTANCE_ID = "extra_expected_instance_id"
 
-        /** DNS anchor: the address the system resolver sends queries to.
-         *  It must NOT be the TUN interface's own address — packets to a local
-         *  address are delivered by the local stack (where nothing listens)
-         *  instead of entering the TUN. The anchor is only *routed* via the
-         *  TUN (/32), so queries land on the router's fd as intended.
-         *  (v1.2.0 set anchor == interface address and killed all DNS.) */
         private const val VIRTUAL_TUN_IPV4 = "10.254.254.1"
-
-        /** The TUN interface's own address — deliberately different from the anchor. */
-        private const val TUN_INTERFACE_IPV4 = "10.254.254.2"
         private const val VERIFY_TIMEOUT_MS = 600
-        private const val FORWARD_TIMEOUT_MS = 1200
     }
 
     private val workerExecutor = Executors.newSingleThreadExecutor()
-    private val queryExecutor = Executors.newCachedThreadPool()
     private val isRunning = AtomicBoolean(false)
-    private val routerRunning = AtomicBoolean(false)
 
     @Volatile
     private var vpnInterface: ParcelFileDescriptor? = null
@@ -107,56 +90,6 @@ class CallsignVpnService : VpnService() {
     /** Daemons that passed identity verification on the current Wi-Fi. */
     @Volatile
     private var activeDaemons: List<DaemonEntry> = emptyList()
-
-    @Volatile
-    private var activeWifiNetwork: Network? = null
-
-    @Volatile
-    private var routerThread: Thread? = null
-
-    // ---- On-device diagnostics (v1.2.2): counters + last error are written
-    // to SharedPreferences so the Activity can SHOW them — a phone-side
-    // bisect (arrival vs forward vs write-back) without needing adb.
-    private val dbgPacketsRaw = java.util.concurrent.atomic.AtomicInteger(0)
-    private val dbgPacketsDns = java.util.concurrent.atomic.AtomicInteger(0)
-    private val dbgForwardOk = java.util.concurrent.atomic.AtomicInteger(0)
-    private val dbgForwardFail = java.util.concurrent.atomic.AtomicInteger(0)
-
-    private fun dbgWrite(block: android.content.SharedPreferences.Editor.() -> Unit) {
-        try {
-            val prefs = getSharedPreferences("callsign_prefs", Context.MODE_PRIVATE)
-            prefs.edit().apply(block).apply()
-        } catch (_: Exception) {
-            // Diagnostics must never break the service.
-        }
-    }
-
-    private fun dbgReset() {
-        dbgPacketsRaw.set(0)
-        dbgPacketsDns.set(0)
-        dbgForwardOk.set(0)
-        dbgForwardFail.set(0)
-        dbgWrite {
-            putString("dbg_state", "starting")
-            putInt("dbg_packets_raw", 0)
-            putInt("dbg_packets_dns", 0)
-            putInt("dbg_fwd_ok", 0)
-            putInt("dbg_fwd_fail", 0)
-            putString("dbg_last_error", "")
-        }
-    }
-
-    /** Persists a counter at 1,2,5,10,25,50,100, then every +100 — enough to bisect, cheap to write. */
-    private fun dbgBump(counter: java.util.concurrent.atomic.AtomicInteger, key: String) {
-        val n = counter.incrementAndGet()
-        if (n <= 2 || n == 5 || n == 10 || n == 25 || n == 50 || n == 100 || n % 100 == 0) {
-            dbgWrite { putInt(key, n) }
-        }
-    }
-
-    private fun dbgError(where: String, e: Exception) {
-        dbgWrite { putString("dbg_last_error", "$where: ${e.javaClass.simpleName}: ${e.message}") }
-    }
 
     private lateinit var connectivityManager: ConnectivityManager
     private var wifiCallbackRegistered = false
@@ -204,7 +137,7 @@ class CallsignVpnService : VpnService() {
                         configuredDaemons = listOf(DaemonEntry(ip, domains, id))
                     }
                 }
-                dbgReset()
+                dbgState("starting")
                 startCompanion()
                 return START_STICKY
             }
@@ -215,8 +148,17 @@ class CallsignVpnService : VpnService() {
     override fun onDestroy() {
         stopCompanion()
         workerExecutor.shutdownNow()
-        queryExecutor.shutdownNow()
         super.onDestroy()
+    }
+
+    /** Small state line the Activity displays (tunnel up / down / unverified). */
+    private fun dbgState(state: String) {
+        try {
+            getSharedPreferences("callsign_prefs", Context.MODE_PRIVATE)
+                .edit().putString("dbg_state", state).apply()
+        } catch (_: Exception) {
+            // Diagnostics must never break the service.
+        }
     }
 
     private fun startCompanion() {
@@ -268,7 +210,7 @@ class CallsignVpnService : VpnService() {
                     TAG,
                     "No configured daemon matched a Callsign identity on this Wi-Fi; keeping VPN dormant."
                 )
-                dbgWrite { putString("dbg_state", "no daemon verified") }
+                dbgState("no daemon verified")
                 teardownTunnel()
             } else {
                 establishSplitDnsTunnel(wifiNetwork, verified)
@@ -406,21 +348,18 @@ class CallsignVpnService : VpnService() {
             val builder = Builder()
                 .setSession("Callsign ($domainLabel & .local)")
                 .setMtu(1500)
-                // Interface address (.2) is deliberately NOT the DNS anchor (.1):
-                // only the anchor is routed into the TUN so resolver queries to
-                // it arrive on the router fd instead of dying in the local stack.
-                .addAddress(TUN_INTERFACE_IPV4, 32)
-                // Point the resolver at the tunnel anchor ITSELF: the DNS router
-                // below reads each query and forwards it to the owning daemon.
-                // (Listing several daemons here would not work — the resolver
-                // treats the first daemon's NXDOMAIN as final.)
-                .addDnsServer(VIRTUAL_TUN_IPV4)
+                // Assign a local non-conflicting /32 interface address
+                .addAddress(VIRTUAL_TUN_IPV4, 32)
+                // Point the resolver at the verified daemons' real LAN IPs,
+                // reached over the underlying Wi-Fi. Sibling daemons forward
+                // for each other, so any of them answers every local name.
+                .apply { for (entry in verified) addDnsServer(entry.ip) }
                 // Enable single-word resolution (e.g. http://plex/ -> plex.<domain>),
                 // for every domain of every verified daemon.
                 .apply { for (domain in allDomains) addSearchDomain(domain) }
                 .addSearchDomain("local")
-                // CRITICAL: Do NOT add 0.0.0.0/0! Only route the /32 virtual anchor so
-                // only DNS packets addressed to the anchor ever enter the TUN.
+                // CRITICAL: Do NOT add 0.0.0.0/0! Only route the /32 virtual anchor so internet
+                // packets never pass through the TUN file descriptor.
                 .addRoute(VIRTUAL_TUN_IPV4, 32)
                 .allowBypass()
 
@@ -434,266 +373,23 @@ class CallsignVpnService : VpnService() {
             val pfd = builder.establish()
             vpnInterface = pfd
             isRunning.set(pfd != null)
-            dbgWrite { putString("dbg_state", if (pfd != null) "tunnel up" else "establish returned null") }
-            if (pfd == null) return
-
+            if (pfd == null) {
+                dbgState("establish returned null")
+                return
+            }
             activeDaemons = verified
-            activeWifiNetwork = wifiNetwork
-            startDnsRouter(pfd)
+            dbgState("tunnel up · ${verified.size} daemon(s)")
             Log.i(
                 TAG,
-                "Established Split-DNS tunnel with in-tunnel DNS router -> " +
+                "Established Split-DNS tunnel -> " +
                     verified.joinToString(", ") { "${it.ip} (${it.domains.joinToString(",")})" }
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed establishing Split-DNS tunnel: ${e.message}", e)
+            dbgState("establish failed: ${e.message}")
             teardownTunnel()
         }
     }
-
-    // ---------------------------------------------------------------------
-    // In-tunnel DNS router: reads DNS queries addressed to the anchor off
-    // the TUN fd, forwards each to the daemon that owns the queried domain
-    // (falling through on NXDOMAIN), and writes the reply packet back.
-    // UDP only — local name answers are small and never truncate.
-    // ---------------------------------------------------------------------
-
-    private fun startDnsRouter(pfd: ParcelFileDescriptor) {
-        val input = FileInputStream(pfd.fileDescriptor)
-        val output = FileOutputStream(pfd.fileDescriptor)
-        routerRunning.set(true)
-        Log.i(TAG, "DNS router started (anchor $VIRTUAL_TUN_IPV4, interface $TUN_INTERFACE_IPV4)")
-        dbgWrite { putString("dbg_state", "router up") }
-        routerThread = Thread {
-            val buffer = ByteArray(32767)
-            while (routerRunning.get()) {
-                val n = try {
-                    input.read(buffer)
-                } catch (e: Exception) {
-                    break // fd closed by teardown
-                }
-                if (n <= 0) break
-                dbgBump(dbgPacketsRaw, "dbg_packets_raw")
-                val packet = buffer.copyOf(n)
-                queryExecutor.execute {
-                    try {
-                        handleDnsPacket(packet, output)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "DNS router dropped a packet: ${e.message}")
-                    }
-                }
-            }
-        }.apply {
-            isDaemon = true
-            name = "callsign-dns-router"
-            start()
-        }
-    }
-
-    private fun handleDnsPacket(packet: ByteArray, output: FileOutputStream) {
-        if (packet.size < 20) return
-        if ((packet[0].toInt() shr 4) != 4) return // IPv4 only
-        val ihl = (packet[0].toInt() and 0x0F) * 4
-        if (packet.size < ihl + 8) return
-        if (packet[9].toInt() != 17) return // UDP only
-        // Destination must be the anchor address itself.
-        if (packet[16] != 10.toByte() || packet[17] != 254.toByte() ||
-            packet[18] != 254.toByte() || packet[19] != 1.toByte()
-        ) return
-        val srcIp = byteArrayOf(packet[12], packet[13], packet[14], packet[15])
-        val srcPort = u16(packet, ihl)
-        val dstPort = u16(packet, ihl + 2)
-        if (dstPort != 53) return
-        val udpLen = u16(packet, ihl + 4)
-        val payloadEnd = if (udpLen >= 8) minOf(packet.size, ihl + udpLen) else packet.size
-        if (payloadEnd <= ihl + 8) return
-        dbgBump(dbgPacketsDns, "dbg_packets_dns")
-        val query = packet.copyOfRange(ihl + 8, payloadEnd)
-
-        // Fast SERVFAIL beats silence: if no daemon answers, the resolver gets
-        // an immediate error instead of hanging every lookup on timeouts.
-        val response = routeQuery(query) ?: buildServfail(query) ?: return
-        val reply = buildUdpReply(packet, srcIp, srcPort, response)
-        synchronized(output) {
-            output.write(reply)
-            output.flush()
-        }
-    }
-
-    /**
-     * Picks the daemon(s) to answer [query]: the owner of the queried domain
-     * first, then the rest in order. A candidate's NXDOMAIN is not final —
-     * the next daemon gets asked (this is what makes `.local` work when each
-     * daemon only knows its own services). Timeouts also fall through.
-     */
-    private fun routeQuery(query: ByteArray): ByteArray? {
-        val daemons = activeDaemons
-        if (daemons.isEmpty()) return null
-        val wifi = activeWifiNetwork ?: return null
-
-        val qname = parseQName(query)
-        val owner = if (qname != null) {
-            daemons.firstOrNull { entry ->
-                entry.domains.any { d -> qname == d || qname.endsWith(".$d") }
-            }
-        } else {
-            null
-        }
-        val candidates = if (owner != null) {
-            listOf(owner) + daemons.filter { it !== owner }
-        } else {
-            daemons
-        }
-
-        var lastNxDomain: ByteArray? = null
-        for (candidate in candidates) {
-            val resp = forwardDnsUdp(wifi, candidate.ip, query) ?: continue
-            val rcode = if (resp.size >= 4) resp[3].toInt() and 0x0F else 0
-            if (rcode != 3) {
-                dbgBump(dbgForwardOk, "dbg_fwd_ok")
-                return resp
-            }
-            lastNxDomain = resp
-        }
-        if (lastNxDomain != null) {
-            dbgBump(dbgForwardOk, "dbg_fwd_ok")
-        } else {
-            dbgBump(dbgForwardFail, "dbg_fwd_fail")
-        }
-        return lastNxDomain
-    }
-
-    /** Builds a SERVFAIL response (header + question only) for [query]. */
-    private fun buildServfail(query: ByteArray): ByteArray? {
-        return try {
-            if (query.size < 12) return null
-            // Find the end of the question section: qname labels + root + QTYPE/QCLASS.
-            var offset = 12
-            while (offset < query.size) {
-                val len = query[offset].toInt() and 0xFF
-                if (len == 0) {
-                    offset += 1
-                    break
-                }
-                if (len > 63) return null
-                offset += 1 + len
-            }
-            val questionEnd = offset + 4
-            if (questionEnd > query.size) return null
-            val out = query.copyOf(questionEnd)
-            // Flags: QR=1, keep RD, RA=1, RCODE=2 (SERVFAIL). Counts: QD=1, others 0.
-            out[2] = (0x80 or (query[2].toInt() and 0x01)).toByte()
-            out[3] = (0x80 or 0x02).toByte()
-            out[4] = 0; out[5] = 1
-            out[6] = 0; out[7] = 0
-            out[8] = 0; out[9] = 0
-            out[10] = 0; out[11] = 0
-            out
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    private fun forwardDnsUdp(wifiNetwork: Network, daemonIp: String, query: ByteArray): ByteArray? {
-        var socket: DatagramSocket? = null
-        return try {
-            // Unbound socket: Network.bindSocket() can throw on an already-bound
-            // DatagramSocket (DatagramSocket() binds an ephemeral port eagerly).
-            // The router's first builds used the eager form — a prime suspect
-            // for forwards that never left the phone.
-            socket = DatagramSocket(null as java.net.SocketAddress?)
-            protect(socket)
-            try {
-                wifiNetwork.bindSocket(socket)
-            } catch (e: Exception) {
-                // Not fatal: protect() alone keeps the packet off the TUN (the
-                // TUN only routes the /32 anchor anyway, LAN traffic can't loop).
-                dbgError("bindSocket(fell back to protect-only)", e)
-            }
-            socket.soTimeout = FORWARD_TIMEOUT_MS
-            val target = InetAddress.getByName(daemonIp)
-            socket.send(DatagramPacket(query, query.size, target, 53))
-            val buf = ByteArray(4096)
-            val resp = DatagramPacket(buf, buf.size)
-            socket.receive(resp)
-            buf.copyOf(resp.length)
-        } catch (e: Exception) {
-            dbgError("forwardDnsUdp->$daemonIp", e)
-            null
-        } finally {
-            socket?.close()
-        }
-    }
-
-    /** Extracts the first question's name from a DNS message ("plex.cofy"). */
-    private fun parseQName(dns: ByteArray): String? {
-        return try {
-            var offset = 12 // skip DNS header
-            val labels = mutableListOf<String>()
-            while (offset < dns.size) {
-                val len = dns[offset].toInt() and 0xFF
-                if (len == 0) break
-                if (len > 63 || offset + 1 + len > dns.size) return null
-                labels.add(String(dns, offset + 1, len, StandardCharsets.US_ASCII))
-                offset += 1 + len
-            }
-            if (labels.isEmpty()) null else labels.joinToString(".").lowercase()
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    /** Wraps a DNS response in an IPv4/UDP packet from anchor:53 back to the resolver. */
-    private fun buildUdpReply(requestPacket: ByteArray, dstIp: ByteArray, dstPort: Int, payload: ByteArray): ByteArray {
-        val totalLen = 20 + 8 + payload.size
-        val out = ByteArray(totalLen)
-        // IPv4 header
-        out[0] = 0x45 // version 4, IHL 5
-        out[1] = 0
-        out[2] = (totalLen shr 8).toByte()
-        out[3] = totalLen.toByte()
-        // Reuse the request's IP ID so replies correlate naturally.
-        out[4] = requestPacket[4]
-        out[5] = requestPacket[5]
-        out[6] = 0
-        out[7] = 0
-        out[8] = 64 // TTL
-        out[9] = 17 // UDP
-        // Source = anchor, destination = whoever sent the query.
-        out[12] = 10; out[13] = 254.toByte(); out[14] = 254.toByte(); out[15] = 1
-        System.arraycopy(dstIp, 0, out, 16, 4)
-        val checksum = ipHeaderChecksum(out)
-        out[10] = (checksum shr 8).toByte()
-        out[11] = checksum.toByte()
-        // UDP header (checksum 0 = unused, legal for IPv4)
-        out[20] = 0; out[21] = 53
-        out[22] = (dstPort shr 8).toByte()
-        out[23] = dstPort.toByte()
-        val udpLen = 8 + payload.size
-        out[24] = (udpLen shr 8).toByte()
-        out[25] = udpLen.toByte()
-        out[26] = 0; out[27] = 0
-        System.arraycopy(payload, 0, out, 28, payload.size)
-        return out
-    }
-
-    private fun ipHeaderChecksum(header: ByteArray): Int {
-        var sum = 0
-        var i = 0
-        while (i < 20) {
-            if (i != 10) { // checksum field itself counts as 0
-                sum += ((header[i].toInt() and 0xFF) shl 8) or (header[i + 1].toInt() and 0xFF)
-            }
-            i += 2
-        }
-        while (sum shr 16 != 0) {
-            sum = (sum and 0xFFFF) + (sum shr 16)
-        }
-        return sum.inv() and 0xFFFF
-    }
-
-    private fun u16(bytes: ByteArray, offset: Int): Int =
-        ((bytes[offset].toInt() and 0xFF) shl 8) or (bytes[offset + 1].toInt() and 0xFF)
 
     @Synchronized
     private fun teardownTunnel() {
@@ -701,19 +397,16 @@ class CallsignVpnService : VpnService() {
     }
 
     private fun teardownTunnelLocked() {
-        dbgWrite { putString("dbg_state", "down") }
-        routerRunning.set(false)
+        dbgState("down")
         isRunning.set(false)
         activeDaemons = emptyList()
-        activeWifiNetwork = null
         vpnInterface?.let { pfd ->
             try {
-                pfd.close() // also unblocks the router thread's read
+                pfd.close()
             } catch (e: Exception) {
                 Log.w(TAG, "Error closing VPN interface: ${e.message}")
             }
         }
         vpnInterface = null
-        routerThread = null
     }
 }

@@ -350,18 +350,12 @@ class MainActivity : Activity() {
         refreshDebugLabel()
     }
 
-    /** Shows the VPN service's on-device counters: state / packets seen / forwarded / failed / last error. */
+    /** Shows the VPN service's state line (tunnel up / down / no daemon verified). */
     private fun refreshDebugLabel() {
         if (!::debugLabel.isInitialized) return
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val state = prefs.getString("dbg_state", "—") ?: "—"
-        val raw = prefs.getInt("dbg_packets_raw", 0)
-        val dns = prefs.getInt("dbg_packets_dns", 0)
-        val ok = prefs.getInt("dbg_fwd_ok", 0)
-        val fail = prefs.getInt("dbg_fwd_fail", 0)
-        val err = prefs.getString("dbg_last_error", "") ?: ""
-        debugLabel.text = "router: $state · pkts $raw · dns $dns · fwd ✓$ok ✗$fail" +
-            if (err.isNotEmpty()) "\nlast error: $err" else ""
+        debugLabel.text = "daemon link: $state"
     }
 
     /** Rebuilds the known-daemons rows: "192.168.1.159 — .cofy, .proj   [Remove]". */

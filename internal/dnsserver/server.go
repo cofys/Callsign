@@ -32,6 +32,11 @@ type Server struct {
 	dnsServers  []*dns.Server
 	dnsClient   *dns.Client
 	dnsClientTC *dns.Client
+
+	// Sibling daemons (multi-daemon households): see peers.go.
+	peersMu    sync.RWMutex
+	peers      []Peer
+	peerClient *dns.Client
 }
 
 // New creates a new DNS Server backed by the configuration store, primary LAN IPv4, and optional Tailscale IPv4.
@@ -48,6 +53,10 @@ func New(store *config.Store, lanIP net.IP) *Server {
 		dnsClientTC: &dns.Client{
 			Net:     "tcp",
 			Timeout: forwardTimeout,
+		},
+		peerClient: &dns.Client{
+			Net:     "udp",
+			Timeout: peerMissTimeout,
 		},
 	}
 }
@@ -130,6 +139,9 @@ func (s *Server) Start(ctx context.Context) ([]string, error) {
 		_ = s.Close()
 	}()
 
+	// Multi-daemon: keep the sibling-daemon table fresh in the background.
+	go s.discoverPeersLoop(ctx)
+
 	if len(bound) == 0 && firstErr != nil {
 		return nil, fmt.Errorf("could not bind DNS port %d (%v)", port, firstErr)
 	}
@@ -204,6 +216,15 @@ func (s *Server) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 
+	// 1b. Sibling daemon zones: a query under a peer's custom domain is
+	// forwarded to the peer that owns it, so any daemon resolves every
+	// daemon's names. An unreachable peer falls through to normal handling.
+	if peer, ok := s.peerForZone(qName); ok {
+		if s.forwardToPeer(w, r, peer) {
+			return
+		}
+	}
+
 	// 2. Authoritative Local Domain Resolution (*.<domain>. and <domain>. and *.local.):
 	domain := s.store.Domain()
 	domainFQDN := domain + "."
@@ -258,6 +279,16 @@ func (s *Server) handleAuthoritativeLocal(
 	}
 
 	if !isKnown {
+		// `.local` is served by every daemon for its own services: a miss
+		// here may be a sibling's service, so ask the peers before answering
+		// NXDOMAIN — unless the query itself came from a peer (one hop max).
+		if strings.HasSuffix(qName, ".local.") &&
+			!s.isPeerIP(extractRemoteIP(w.RemoteAddr())) {
+			if resp := s.tryPeersForLocalMiss(r); resp != nil {
+				_ = w.WriteMsg(resp)
+				return
+			}
+		}
 		m.SetRcode(r, dns.RcodeNameError)
 		_ = w.WriteMsg(m)
 		return

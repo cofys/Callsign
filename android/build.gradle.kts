@@ -18,8 +18,8 @@ android {
         applicationId = "dev.callsign.companion"
         minSdk = 24
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.2.2"
+        versionCode = 6
+        versionName = "1.3.0"
     }
 
     // Pure Kotlin/DEX bytecode with zero native C++ (.so) dependencies:
